@@ -16,6 +16,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import com.nuvio.app.getPlatform
+
+// macOS already supplies continuous, accelerated trackpad/Magic Mouse deltas, including
+// momentum. Replacing them with a 360ms wheel animation restarts the easing on each event.
+internal val preferPlatformScrollPhysics: Boolean =
+    getPlatform().name.contains("Mac", ignoreCase = true)
 
 // One wheel notch reports ~1.0 on desktop; this is how far (in px) a single notch travels.
 private const val SMOOTH_WHEEL_PIXELS_PER_NOTCH = 210f
@@ -36,7 +42,7 @@ private const val SMOOTH_WHEEL_DURATION_MS = 360
 internal fun Modifier.smoothVerticalWheelScroll(
     state: LazyListState,
     enabled: Boolean = true,
-): Modifier = if (!enabled) this else composed {
+): Modifier = if (!enabled || preferPlatformScrollPhysics) this else composed {
     val scope = rememberCoroutineScope()
     val controller = remember(state) { SmoothWheelScrollController(state) }
     pointerInput(state) {

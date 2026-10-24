@@ -70,6 +70,13 @@
                       eventMethod:(jmethodID)eventMethod;
 - (void)shutdown;
 - (void)updateControlsJson:(NSString *)controlsJson;
+- (void)runJavaScript:(NSString *)script;
+- (void)setCursorHidden:(BOOL)hidden;
+- (void)forceVideoRedraw;
+- (void)setStringProperty:(const char *)name value:(NSString *)value;
+- (double)doubleProperty:(const char *)name fallback:(double)fallback;
+- (BOOL)flagProperty:(const char *)name fallback:(BOOL)fallback;
+- (void)setSubtitleAssStyleMode:(NSString *)mode scale:(double)scale;
 - (void)setPaused:(BOOL)paused;
 - (BOOL)isPaused;
 - (void)seekToMilliseconds:(long long)positionMs;
@@ -85,8 +92,8 @@
 - (NSString *)audioTracksJson;
 - (NSString *)subtitleTracksJson;
 - (NSString *)chaptersJson;
-- (void)selectAudioTrackId:(int)trackId;
-- (void)selectSubtitleTrackId:(int)trackId;
+- (BOOL)selectAudioTrackId:(int)trackId;
+- (BOOL)selectSubtitleTrackId:(int)trackId;
 - (void)addSubtitleUrl:(NSString *)url;
 - (void)removeExternalSubtitles;
 - (void)removeExternalSubtitlesAndSelect:(int)trackId;
@@ -1009,10 +1016,15 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     dispatch_queue_t _mpvEventQueue;
     BOOL _didFocusControlsWebView;
     BOOL _controlsWebReady;
+    BOOL _cursorHidden;
+    NSMutableArray<NSString *> *_pendingScripts;
+    NSString *_subtitleAssStyleMode;
+    double _subtitleAssScale;
     BOOL _fullscreenTransitionActive;
     NSString *_pendingControlsJson;
     double _initialStartSeconds;
     BOOL _controlsSyncInFlight;
+    BOOL _playbackRestartReported;
     NSRect _lastAppliedNativeLayoutBounds;
     BOOL _lastAppliedNativeLayoutWasLiveResize;
     NSTimeInterval _lightweightResizeSettleUntil;
@@ -1450,6 +1462,20 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         setMpvOptionString(_mpv, "audio-files-append", audioSourceUrl.UTF8String);
     }
 
+    for (NSString *rawOption in mpvOptions) {
+        if ([rawOption hasPrefix:@"@nuvio-config-mode="]) continue;
+        BOOL userOption = [rawOption hasPrefix:@"@nuvio-user:"];
+        NSString *option = userOption ? [rawOption substringFromIndex:12] : rawOption;
+        NSRange separator = [option rangeOfString:@"="];
+        if (separator.location == NSNotFound || separator.location == 0) continue;
+        NSString *key = [option substringToIndex:separator.location];
+        NSString *value = [option substringFromIndex:separator.location + 1];
+        if (userOption && (([configMode isEqualToString:@"add"] && [configured containsObject:key]) ||
+                           (fullUserConfig && [configured containsObject:key]))) continue;
+        setMpvOptionString(_mpv, key.UTF8String, value.UTF8String);
+        if (!userOption) [configured addObject:key];
+    }
+
     int initResult = mpv_initialize(_mpv);
     if (initResult < 0) {
         NSString *reason = [NSString stringWithFormat:@"mpv_initialize failed: %s", mpv_error_string(initResult)];
@@ -1507,6 +1533,43 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 return;
             }
 
+            // The Kotlin player waits for these lifecycle events before accepting snapshots.
+            // Polling properties alone leaves it permanently "loading", triggering its stall
+            // recovery even while libmpv is already decoding and presenting the video.
+            NSMutableArray<NSDictionary *> *events = [NSMutableArray array];
+            for (int count = 0; count < 128; count++) {
+                mpv_event *event = mpv_wait_event(mpv, 0.0);
+                if (!event || event->event_id == MPV_EVENT_NONE) break;
+                switch (event->event_id) {
+                    case MPV_EVENT_START_FILE:
+                        self->_playbackRestartReported = NO;
+                        break;
+                    case MPV_EVENT_FILE_LOADED:
+                        [events addObject:@{ @"type": @"fileLoaded", @"value": @1 }];
+                        break;
+                    case MPV_EVENT_PLAYBACK_RESTART:
+                        // Seeks and buffering also raise PLAYBACK_RESTART. The shared layer
+                        // uses it as the first-frame signal, once for each loaded file.
+                        if (!self->_playbackRestartReported) {
+                            self->_playbackRestartReported = YES;
+                            [events addObject:@{ @"type": @"playbackRestart", @"value": @1 }];
+                        }
+                        break;
+                    case MPV_EVENT_END_FILE: {
+                        mpv_event_end_file *end = (mpv_event_end_file *)event->data;
+                        if (end && end->reason == MPV_END_FILE_REASON_ERROR) {
+                            NSString *prefix = self->_playbackRestartReported
+                                ? @"mpvPlaybackError:" : @"mpvStartupError:";
+                            NSString *message = [NSString stringWithUTF8String:mpv_error_string(end->error)];
+                            [events addObject:@{ @"type": [prefix stringByAppendingString:message], @"value": @0 }];
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+
             double duration = [self doubleProperty:"duration" fallback:0.0];
             double position = [self doubleProperty:"time-pos" fallback:0.0];
             double cacheAhead = [self cacheAheadSecondsForPosition:position];
@@ -1530,6 +1593,11 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 self->_controlsSyncInFlight = NO;
                 if (!self->_webView || self->_mpv != mpv) {
                     return;
+                }
+                // Publish after refreshing the cached snapshot so the first-frame callback
+                // cannot expose the initial loading/zero-position placeholder to Kotlin.
+                for (NSDictionary *event in events) {
+                    [self sendPlayerEvent:event[@"type"] value:[event[@"value"] doubleValue]];
                 }
                 [self applyHdrForPolledGamma:gamma primaries:primaries reason:@"sync" force:NO];
                 NSString *script = [NSString stringWithFormat:
@@ -1740,6 +1808,8 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 }
 
 - (void)shutdown {
+    [self setCursorHidden:NO];
+    _pendingScripts = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [_timer invalidate];
     _timer = nil;
@@ -1961,6 +2031,10 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     return [self tracksJsonForType:@"sub"];
 }
 
+- (void)toggleStatsOverlay {
+    [self command:@[@"script-binding", @"stats/display-stats-toggle"]];
+}
+
 - (NSString *)chaptersJson {
     if (!_mpv) return @"[]";
     NSMutableArray<NSDictionary *> *chapters = [NSMutableArray array];
@@ -1976,42 +2050,33 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         [chapters addObject:@{ @"startTime": @(startTime), @"title": title ?: @"" }];
     }
 
-    for (NSString *rawOption in mpvOptions) {
-        if ([rawOption hasPrefix:@"@nuvio-config-mode="]) continue;
-        BOOL userOption = [rawOption hasPrefix:@"@nuvio-user:"];
-        NSString *option = userOption ? [rawOption substringFromIndex:12] : rawOption;
-        NSRange separator = [option rangeOfString:@"="];
-        if (separator.location == NSNotFound || separator.location == 0) continue;
-        NSString *key = [option substringToIndex:separator.location];
-        NSString *value = [option substringFromIndex:separator.location + 1];
-        if (userOption && (([configMode isEqualToString:@"add"] && [configured containsObject:key]) ||
-                           (fullUserConfig && [configured containsObject:key]))) continue;
-        setMpvOptionString(_mpv, key.UTF8String, value.UTF8String);
-        if (!userOption) [configured addObject:key];
-    }
     NSData *data = [NSJSONSerialization dataWithJSONObject:chapters options:0 error:nil];
     return data ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"[]") : @"[]";
 }
 
-- (void)selectAudioTrackId:(int)trackId {
-    if (!_mpv) return;
+- (BOOL)selectAudioTrackId:(int)trackId {
+    if (!_mpv) return NO;
     int64_t id = trackId;
-    mpv_set_property(_mpv, "aid", MPV_FORMAT_INT64, &id);
+    return mpv_set_property(_mpv, "aid", MPV_FORMAT_INT64, &id) >= 0;
 }
 
-- (void)selectSubtitleTrackId:(int)trackId {
-    if (!_mpv) return;
+- (BOOL)selectSubtitleTrackId:(int)trackId {
+    if (!_mpv) return NO;
+    int result;
     if (trackId < 0) {
-        [self setStringProperty:"sid" value:@"no"];
-        return;
+        result = mpv_set_property_string(_mpv, "sid", "no");
+    } else {
+        int64_t id = trackId;
+        result = mpv_set_property(_mpv, "sid", MPV_FORMAT_INT64, &id);
     }
-    int64_t id = trackId;
-    mpv_set_property(_mpv, "sid", MPV_FORMAT_INT64, &id);
+    [self refreshSubtitleAssStyle];
+    return result >= 0;
 }
 
 - (void)addSubtitleUrl:(NSString *)url {
     if (!_mpv || url.length == 0) return;
     [self command:@[@"sub-add", url, @"select"]];
+    [self refreshSubtitleAssStyle];
 }
 
 - (void)removeExternalSubtitles {
@@ -2061,6 +2126,45 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 
     int64_t position = MAX(0, MIN(150, subPos));
     mpv_set_property(_mpv, "sub-pos", MPV_FORMAT_INT64, &position);
+    [self refreshSubtitleAssStyle];
+}
+
+- (void)setSubtitleAssStyleMode:(NSString *)mode scale:(double)scale {
+    if (![@[@"no", @"yes", @"scale", @"force"] containsObject:mode]) return;
+    _subtitleAssStyleMode = [mode copy];
+    _subtitleAssScale = fmax(0.1, fmin(5.0, scale));
+    [self refreshSubtitleAssStyle];
+    [self forceVideoRedraw];
+}
+
+- (void)refreshSubtitleAssStyle {
+    NSString *codec = [[self stringProperty:"current-tracks/sub/codec" fallback:@""] lowercaseString];
+    BOOL ass = [codec isEqualToString:@"ass"] || [codec isEqualToString:@"ssa"];
+    [self setStringProperty:"sub-ass-override" value:ass ? (_subtitleAssStyleMode ?: @"force") : @"force"];
+    double scale = ass && _subtitleAssScale > 0.0 ? _subtitleAssScale : 1.0;
+    if (_mpv) mpv_set_property(_mpv, "sub-scale", MPV_FORMAT_DOUBLE, &scale);
+}
+
+- (void)runJavaScript:(NSString *)script {
+    if (!_webView || script.length == 0) return;
+    if (!_controlsWebReady) {
+        if (!_pendingScripts) _pendingScripts = [NSMutableArray array];
+        [_pendingScripts addObject:script];
+        return;
+    }
+    [_webView evaluateJavaScript:script completionHandler:nil];
+}
+
+- (void)setCursorHidden:(BOOL)hidden {
+    if (_cursorHidden == hidden) return;
+    _cursorHidden = hidden;
+    if (hidden) [NSCursor hide]; else [NSCursor unhide];
+}
+
+- (void)forceVideoRedraw {
+    [_videoView updateMetalLayerLayout];
+    [_videoView scheduleRenderUpdate];
+    [_videoView setNeedsDisplay:YES];
 }
 
 - (double)doubleProperty:(const char *)name fallback:(double)fallback {
@@ -2299,6 +2403,9 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     if ([type isEqualToString:@"controlsReady"]) {
         _controlsWebReady = YES;
         [self flushPendingControlsJsonIfReady];
+        NSArray<NSString *> *pending = [_pendingScripts copy];
+        [_pendingScripts removeAllObjects];
+        for (NSString *script in pending) [self runJavaScript:script];
         [self syncControls];
         return;
     }
@@ -2685,10 +2792,6 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_subtitleTracksJson
     return env->NewStringUTF(json.UTF8String);
 }
 
-- (void)toggleStatsOverlay {
-    [self command:@[@"script-binding", @"stats/display-stats-toggle"]];
-}
-
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_chaptersJson(
     JNIEnv *env,
@@ -2701,18 +2804,20 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_chaptersJson(
     return env->NewStringUTF(json.UTF8String);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectAudioTrack(
     JNIEnv * /* env */,
     jobject /* bridge */,
     jlong handle,
     jint trackId
 ) {
-    if (handle == 0) return;
+    if (handle == 0) return JNI_FALSE;
     MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
-    runOnMainAsync(^{
-        [player selectAudioTrackId:(int)trackId];
+    __block BOOL selected = NO;
+    runOnMainSync(^{
+        selected = [player selectAudioTrackId:(int)trackId];
     });
+    return selected ? JNI_TRUE : JNI_FALSE;
 }
 
 // Seek-preview extraction currently uses the Windows libmpv worker path. Keep the JNI surface
@@ -2734,10 +2839,11 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectSubtitleTrac
 ) {
     if (handle == 0) return JNI_FALSE;
     MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
-    runOnMainAsync(^{
-        [player selectSubtitleTrackId:(int)trackId];
+    __block BOOL selected = NO;
+    runOnMainSync(^{
+        selected = [player selectSubtitleTrackId:(int)trackId];
     });
-    return JNI_TRUE;
+    return selected ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -2807,12 +2913,14 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_applySubtitleStyle
     jfloat outlineSize,
     jboolean bold,
     jfloat fontSize,
-    jint subPos
+    jint subPos,
+    jstring fontName
 ) {
     if (handle == 0) return;
     std::string text = jstringToString(env, textColor);
     std::string background = jstringToString(env, backgroundColor);
     std::string outline = jstringToString(env, outlineColor);
+    std::string font = jstringToString(env, fontName);
     MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
     runOnMainAsync(^{
         [player applySubtitleStyleWithTextColor:[NSString stringWithUTF8String:text.c_str()]
@@ -2822,6 +2930,7 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_applySubtitleStyle
                                             bold:bold == JNI_TRUE
                                         fontSize:(double)fontSize
                                           subPos:(int)subPos];
+        [player setStringProperty:"sub-font" value:[NSString stringWithUTF8String:font.c_str()]];
     });
 }
 
@@ -2834,4 +2943,106 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_toggleStatsOverlay
     if (handle == 0) return;
     MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
     runOnMainAsync(^{ [player toggleStatsOverlay]; });
+}
+
+// Shared playback JNI entry points. Cocoa/WebKit changes are serialized on the main thread.
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMpvProperty(
+    JNIEnv *env, jobject, jlong handle, jstring key, jstring value
+) {
+    if (!handle) return;
+    std::string keyText = jstringToString(env, key);
+    std::string valueText = jstringToString(env, value);
+    // Internal Windows/SVP directives are not libmpv properties.
+    if (keyText.empty() || keyText[0] == '@') return;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{
+        [player setStringProperty:keyText.c_str() value:[NSString stringWithUTF8String:valueText.c_str()]];
+    });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_runJavaScript(
+    JNIEnv *env, jobject, jlong handle, jstring script
+) {
+    if (!handle) return;
+    std::string text = jstringToString(env, script);
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player runJavaScript:[NSString stringWithUTF8String:text.c_str()]]; });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setCursorHidden(
+    JNIEnv *, jobject, jlong handle, jboolean hidden
+) {
+    if (!handle) return;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player setCursorHidden:hidden == JNI_TRUE]; });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_forceVideoRedraw(
+    JNIEnv *, jobject, jlong handle
+) {
+    if (!handle) return;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player forceVideoRedraw]; });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setSubtitleAssStyleMode(
+    JNIEnv *env, jobject, jlong handle, jstring mode, jdouble scale
+) {
+    if (!handle) return;
+    std::string text = jstringToString(env, mode);
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player setSubtitleAssStyleMode:[NSString stringWithUTF8String:text.c_str()] scale:scale]; });
+}
+
+// This shared call updates the Windows SMTC widget; macOS does not provide that integration yet.
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMediaSessionMetadata(
+    JNIEnv *, jobject, jlong, jstring, jstring, jstring
+) {}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setVolume(
+    JNIEnv *, jobject, jlong handle, jfloat volume
+) {
+    if (!handle) return;
+    std::string value = std::to_string(fmax(0.0, fmin(200.0, volume)));
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player setStringProperty:"volume" value:[NSString stringWithUTF8String:value.c_str()]]; });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMute(
+    JNIEnv *, jobject, jlong handle, jboolean muted
+) {
+    if (!handle) return;
+    std::string value = std::string(muted == JNI_TRUE ? "yes" : "no");
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    runOnMainAsync(^{ [player setStringProperty:"mute" value:[NSString stringWithUTF8String:value.c_str()]]; });
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_volume(
+    JNIEnv *, jobject, jlong handle
+) {
+    if (!handle) return 100.0f;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    __block double value = 0;
+    runOnMainSync(^{ value = [player doubleProperty:"volume" fallback:100.0]; });
+    return (jfloat)value;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isMuted(
+    JNIEnv *, jobject, jlong handle
+) {
+    if (!handle) return JNI_FALSE;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    __block double value = 0;
+    runOnMainSync(^{ value = [player flagProperty:"mute" fallback:NO]; });
+    return value ? JNI_TRUE : JNI_FALSE;
 }

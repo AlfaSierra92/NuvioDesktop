@@ -580,6 +580,7 @@ internal class NativePlayerController(
     }
 
     fun completeSvpStartupProfile() {
+        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
         handle.takeIf { it != 0L }?.let { NativePlayerBridge.completeSvpStartupProfile(it) }
     }
 
@@ -1732,9 +1733,10 @@ internal class NativePlayerController(
         handle.takeIf { it != 0L }?.let { current -> NativePlayerBridge.setSubtitleDelayMs(current, clamped) }
     }
 
-    override val supportsSpeechSpots: Boolean get() = handle != 0L
+    override val supportsSpeechSpots: Boolean get() = DesktopHostOs.current == DesktopHostOs.WINDOWS && handle != 0L
 
     override fun decodeSpeechSpot(startSeconds: Double, durationSeconds: Double): FloatArray? {
+        if (!supportsSpeechSpots) return null
         val current = handle.takeIf { it != 0L } ?: return null
         val directory = File(System.getProperty("java.io.tmpdir"), "nuvio-autosync").apply { mkdirs() }
         val file = File.createTempFile("speech-", ".f32", directory)
@@ -1750,7 +1752,7 @@ internal class NativePlayerController(
     }
 
     override fun sourceBytesPerSecond(): Double? =
-        handle.takeIf { it != 0L }
+        handle.takeIf { supportsSpeechSpots }
             ?.let { NativePlayerBridge.speechSourceBytesPerSecond(it) }
             ?.takeIf { it > 0.0 }
 

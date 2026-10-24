@@ -291,7 +291,9 @@ val isAndroidAppBundleBuild = requestedGradleTasks.any { taskName ->
 
 val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generateRuntimeConfigs") {
     outputDir.set(generatedRuntimeConfigDir)
-    localPropertiesFile.set(rootProject.layout.projectDirectory.file("local.properties"))
+    rootProject.layout.projectDirectory.file("local.properties").takeIf { it.asFile.isFile }?.let {
+        localPropertiesFile.set(it)
+    }
     appVersionName.set(releaseAppVersionName)
     appVersionCode.set(releaseAppVersionCode)
     desktopAppVersionName.set(desktopReleaseVersionName)
@@ -300,6 +302,7 @@ val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generat
 
 val isMacHost = System.getProperty("os.name").contains("mac", ignoreCase = true)
 val isWindowsHost = System.getProperty("os.name").contains("win", ignoreCase = true)
+val desktopPackageName = if (isMacHost) "Nuvio HTPC" else "Nuvio"
 val mpvKitDir = providers.gradleProperty("nuvio.mpvkit.dir")
     .orElse(rootProject.layout.projectDirectory.dir("MPVKit").asFile.absolutePath)
 val macosPlayerBridgeSource = layout.projectDirectory.file("src/desktopMain/native/macos/player_bridge.mm")
@@ -344,7 +347,25 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
     listOf(
         "/bin/sh",
         "-c",
-        "printf '%s\\n' '$missingMpvKitMacosShellMessage' >&2; exit 1",
+        """
+        set -eu
+        export PATH="/opt/homebrew/bin:/usr/local/bin:${'$'}PATH"
+        if ! command -v pkg-config >/dev/null || ! pkg-config --exists mpv; then
+          printf '%s\n' 'Install macOS build dependencies with: brew install mpv pkg-config' >&2
+          printf '%s\n' '$missingMpvKitMacosShellMessage' >&2
+          exit 1
+        fi
+        exec xcrun clang++ -std=c++17 -dynamiclib -fobjc-arc -ObjC++ \
+          -arch ${shellQuote(macosPlayerBridgeArch)} \
+          -mmacosx-version-min=11.0 -Wl,-headerpad_max_install_names \
+          ${shellQuote(macosPlayerBridgeSourceFile.absolutePath)} \
+          -o ${shellQuote(macosPlayerBridgeOutputFile.absolutePath)} \
+          -I${shellQuote("$macosPlayerBridgeJavaHome/include")} \
+          -I${shellQuote("$macosPlayerBridgeJavaHome/include/darwin")} \
+          -framework AppKit -framework WebKit -framework Metal -framework Security \
+          -framework IOKit -framework OpenGL -framework QuartzCore \
+          ${'$'}(pkg-config --cflags --libs mpv)
+        """.trimIndent(),
     )
 } else {
     mutableListOf(
@@ -378,6 +399,9 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
           -framework WebKit \
           -framework Metal \
           -framework Security \
+          -framework IOKit \
+          -framework OpenGL \
+          -framework QuartzCore \
           -lswiftCompatibility56 \
           -lswiftCompatibilityConcurrency \
           -lswiftCompatibilityPacks \
@@ -399,6 +423,23 @@ val buildMacosPlayerBridge = tasks.register<Exec>("buildMacosPlayerBridge") {
     inputs.files(mpvKitGeneratedPkgConfigDirs.mapNotNull { it.parentFile?.resolve("lib")?.takeIf(File::exists) })
     outputs.file(macosPlayerBridgeOutput)
     commandLine(macosPlayerBridgeCommand)
+}
+
+val prepareMacosPlayerRuntime = tasks.register<Exec>("prepareMacosPlayerRuntime") {
+    group = "build"
+    description = "Bundles the macOS player and its non-system dylibs with relocatable loader paths."
+    enabled = isMacHost
+    dependsOn(buildMacosPlayerBridge)
+    inputs.file(rootProject.file("scripts/bundle-macos-runtime.py"))
+    inputs.file(macosPlayerBridgeOutput)
+    outputs.dir(layout.buildDirectory.dir("native/macos-runtime"))
+    // Homebrew can update a transitive dylib without changing the bridge itself.
+    outputs.upToDateWhen { false }
+    commandLine(
+        "/usr/bin/python3", rootProject.file("scripts/bundle-macos-runtime.py").absolutePath,
+        macosPlayerBridgeOutput.get().asFile.absolutePath,
+        layout.buildDirectory.dir("native/macos-runtime").get().asFile.absolutePath,
+    )
 }
 
 val windowsPlayerBridgeArch = when (System.getProperty("os.arch").lowercase()) {
@@ -1033,8 +1074,12 @@ val desktopResourcesSourceDir = layout.projectDirectory.dir("src/desktopMain/res
 
 tasks.withType<Jar>().configureEach {
     if (isMacHost && name == "desktopJar") {
-        dependsOn(buildMacosPlayerBridge)
+        dependsOn(prepareMacosPlayerRuntime)
         from(macosPlayerBridgeOutput) {
+            into("native/macos")
+        }
+        from(layout.buildDirectory.dir("native/macos-runtime")) {
+            include("runtime-files.txt")
             into("native/macos")
         }
     }
@@ -1061,6 +1106,25 @@ tasks.withType<Jar>().configureEach {
         // Shipped as loose files under <install>\resources instead; see externalDesktopResources.
         if (leanDesktopJar) {
             exclude(externalDesktopResources)
+        }
+    }
+}
+
+if (isMacHost) {
+    tasks.withType<JavaExec>().matching { it.name in setOf("run", "runRelease", "desktopRun") }.configureEach {
+        dependsOn(prepareMacosPlayerRuntime)
+    }
+    listOf("createDistributable" to "main", "createReleaseDistributable" to "main-release").forEach { (taskName, flavor) ->
+        tasks.matching { it.name == taskName }.configureEach {
+            dependsOn(prepareMacosPlayerRuntime)
+            inputs.dir(layout.buildDirectory.dir("native/macos-runtime"))
+            notCompatibleWithConfigurationCache("Stages the macOS native player in the app bundle.")
+            doLast {
+                copy {
+                    from(layout.buildDirectory.dir("native/macos-runtime"))
+                    into(layout.buildDirectory.dir("compose/binaries/$flavor/app/$desktopPackageName.app/Contents/app/native"))
+                }
+            }
         }
     }
 }
@@ -1577,12 +1641,12 @@ mapOf(
         inputs.file(layout.projectDirectory.file("startup-classes.lst")).optional()
         doLast {
             val binariesDir = layout.buildDirectory.dir("compose/binaries/$imageFlavor/app").get().asFile
-            val appDir = listOf("Nuvio/app", "Nuvio.app/Contents/app", "nuvio/lib/app")
+            val appDir = listOf("Nuvio/app", "$desktopPackageName.app/Contents/app", "nuvio/lib/app")
                 .map(binariesDir::resolve)
                 .firstOrNull(File::isDirectory)
             check(appDir != null) { "No packaged app directory found under $binariesDir" }
             trimMaterialIconsExtendedJar(appDir, logger)
-            trimOnnxRuntimeJar(appDir, logger)
+            if (isWindowsHost) trimOnnxRuntimeJar(appDir, logger)
             // After the jar trims above: the key covers jar sizes, which they change.
             bundleStartupClassList(appDir, layout.projectDirectory.file("startup-classes.lst").asFile, logger)
             if (isWindowsHost) {
@@ -1701,6 +1765,7 @@ kotlin {
 // opt-in: run them with `-Pnuvio.focusTests` before shipping input changes, and on CI where nobody
 // is at the keyboard.
 tasks.withType<Test>().configureEach {
+    if (isMacHost) dependsOn(prepareMacosPlayerRuntime)
     // DesktopStorage would otherwise read and write the real %LOCALAPPDATA%/NuvioHTPC, including
     // moving its settings into account folders the first time a test opens a store.
     val testDataDir = layout.buildDirectory.dir("test-data-dir").get().asFile
@@ -1742,9 +1807,10 @@ compose.desktop {
         // black-screened fullscreen playback on some drivers (see DesktopRendererApi). The
         // 2026-09-07 measurement still holds — D3D has a ~3 ms per-frame floor OpenGL does not —
         // which is why OpenGL stays selectable in Settings.
-        val skikoRenderApi = "DIRECT3D"
+        val skikoRenderApi = if (isMacHost) "METAL" else if (isWindowsHost) "DIRECT3D" else "OPENGL"
         jvmArgs += listOfNotNull(
             "-Dapple.awt.application.appearance=NSAppearanceNameDarkAqua",
+            if (isMacHost) "-Xdock:name=Nuvio HTPC" else null,
             "-Dskiko.renderApi=$skikoRenderApi",
             // Java2D's own Direct3D 9 pipeline. Compose draws through Skiko (D3D12/OpenGL) and mpv
             // through D3D11, so Java2D only paints the tray-menu dialog and the empty SwingPanel
@@ -1849,7 +1915,7 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "Nuvio"
+            packageName = desktopPackageName
             packageVersion = desktopReleasePackageVersion
             vendor = desktopPublisher
             // Becomes the exe's FileDescription, which is the name Explorer shows for a pin made

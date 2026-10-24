@@ -68,6 +68,9 @@ internal actual fun Modifier.horizontalListMouseInput(
                         accumulatedDrag = 0f
                     }
                     PointerEventType.Scroll -> {
+                        // Let LazyRow keep the native macOS scale and momentum. Multiplying
+                        // every precision delta by a 240px mouse notch makes trackpads jump.
+                        if (preferPlatformScrollPhysics) continue
                         val change = event.changes.firstOrNull() ?: continue
                         val scrollDelta = change.scrollDelta
                         // Only hijack the wheel for horizontal scrolling when the wheel itself

@@ -410,6 +410,7 @@ private object OnnxRuntimeNatives {
     private val libraries = listOf("onnxruntime.dll", "onnxruntime4j_jni.dll", "onnxruntime_providers_shared.dll")
 
     fun install() {
+        if (!System.getProperty("os.name").contains("win", ignoreCase = true)) return
         // An explicit location (a developer's, or a test's) wins.
         if (System.getProperty(NativePathProperty) != null) return
         val directory = DesktopStorage.rootDir.resolve("native").resolve("onnxruntime-$Version")

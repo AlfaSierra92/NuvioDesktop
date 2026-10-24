@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.IntSize
 import co.touchlab.kermit.Logger
 import com.nuvio.app.features.player.desktop.DesktopIdleHeapTrim
 import com.nuvio.app.features.player.desktop.NativePlayerBridge
+import com.nuvio.app.features.player.desktop.DesktopHostOs
 import com.nuvio.app.features.player.desktop.setDesktopPictureInPicture
 import com.nuvio.app.features.player.desktop.desktopPictureInPictureState
 
@@ -41,6 +42,7 @@ actual fun EnterImmersivePlayerMode(keepScreenAwake: Boolean) {
 }
 
 private fun setDisplaySleepInhibited(inhibited: Boolean) {
+    if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
     runCatching { NativePlayerBridge.setWindowsDisplaySleepInhibited(inhibited) }
         .onFailure { PlayerKeepAwakeLog.w(it) { "keep-awake ${if (inhibited) "on" else "off"} failed" } }
 }

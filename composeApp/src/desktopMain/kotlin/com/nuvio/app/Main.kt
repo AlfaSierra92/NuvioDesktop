@@ -1082,11 +1082,17 @@ fun main(args: Array<String>) {
                     com.nuvio.app.core.ui.DesktopHdrUiCompensationEffect(window)
                 }
             } else {
+                val smokeLastSecond = remember { java.util.concurrent.atomic.AtomicLong(-1L) }
                 PlatformPlayerSurface(
                     sourceUrl = smokePlayerUrl,
                     modifier = Modifier.fillMaxSize(),
                     onControllerReady = { println("Info: (PlayerSmoke) controller ready") },
-                    onSnapshot = {},
+                    onSnapshot = { snapshot ->
+                        val second = snapshot.positionMs / 1000L
+                        if (!snapshot.isLoading && smokeLastSecond.getAndSet(second) != second) {
+                            println("Info: (PlayerSmoke) progress second=$second ended=${snapshot.isEnded}")
+                        }
+                    },
                     onError = { error -> System.err.println("Error: (PlayerSmoke) $error") },
                 )
             }
@@ -1134,6 +1140,7 @@ private fun configureDesktopChrome() {
 // launch. An explicit user choice always wins; if none is saved we default to Direct3D.
 // Best-effort — on any failure Skiko falls back to its own platform default.
 private fun configureDesktopRenderer() {
+    if (!System.getProperty("os.name").contains("win", ignoreCase = true)) return
     runCatching {
         val stored = PlayerSettingsStorage.loadDesktopRendererApi()
             ?.let { runCatching { DesktopRendererApi.valueOf(it) }.getOrNull() }

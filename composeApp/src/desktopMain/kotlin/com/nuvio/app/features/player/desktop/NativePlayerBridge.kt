@@ -15,8 +15,12 @@ internal fun findPackagedNativeRuntime(
     javaHome: File?,
     requiredFiles: List<String>,
 ): File? {
-    if (platform != DesktopHostOs.WINDOWS) return null
-    val installDir = javaHome?.parentFile?.takeIf { it.isDirectory } ?: return null
+    val installDir = when (platform) {
+        DesktopHostOs.WINDOWS -> javaHome?.parentFile
+        // jpackage embeds the JDK at Contents/runtime/Contents/Home.
+        DesktopHostOs.MACOS -> javaHome?.parentFile?.parentFile?.parentFile?.resolve("app/native")
+        else -> null
+    }?.takeIf { it.isDirectory } ?: return null
     return installDir.takeIf { dir -> requiredFiles.all { dir.resolve(it).isFile } }
 }
 

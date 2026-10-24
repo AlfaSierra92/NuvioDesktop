@@ -7,7 +7,7 @@
   [![License][license-shield]][license-url]
 
   <p>
-    Nuvio HTPC (Home Theatre PC) is a feature rich Windows media client for either desk or couch.
+    Nuvio HTPC (Home Theatre PC) is a feature rich desktop media client for Windows and macOS, for either desk or couch.
     <br>To see it in action, click the image for a showcase video.<br/>
   </p> 
 </div>
@@ -17,6 +17,31 @@
 This fork is unaffiliated with the Nuvio team. Don't worry about the commit disparity, Nuvio's team makes many small commits while I bundle everything into a single release commit for simplicity as this is mostly a solo focused project. 
 
 If you're a Linux user check out [Slokker's Linux Fork.](https://github.com/iamSlokker/NuvioDesktop-Linux) It supports appimage, flatpack or debian. It's based on the nightly releases of this project.
+
+## macOS support
+
+This fork includes initial macOS support under the app name **Nuvio HTPC**, with
+`.app` and `.dmg` packaging. Building and local video playback have been verified
+on Apple Silicon. Intel builds use the host JDK's architecture but have not yet
+been verified; universal binaries are not generated.
+
+The macOS port includes:
+
+- Metal rendering for the Compose interface, without forcing the Windows Direct3D backend.
+- The native Objective-C++/libmpv player with playback properties, volume/mute,
+  subtitle styling and track selection, JavaScript controls, and video redraw support.
+- Delivery of libmpv's file-loaded and first-playback events to the shared player.
+  This fixes playback being treated as permanently loading and repeatedly reopened.
+- Native macOS scrolling for the home and horizontal lists, preserving trackpad
+  and Magic Mouse deltas instead of applying mouse-wheel multipliers and extra easing.
+- Bundling and relocation of the player's non-system libraries, so Homebrew is
+  required on the build machine rather than the machine running the packaged app.
+- Preservation of ONNX Runtime's macOS libraries in the packaged application.
+
+Windows-specific features, including Direct3D, NVIDIA RTX Video, XInput polling,
+and the bundled Windows Nuvio Engine/SVP runtime, are not supplied by this port.
+Network streams, large home catalogs, and all playback options have not been
+exhaustively tested. See [Build on macOS](#build-on-macos) for setup and validation.
 
 # Home Theatre features
 
@@ -223,11 +248,103 @@ Platform-specific packaging:
 ./gradlew :composeApp:packageReleaseMsi --rerun-tasks
 
 # macOS
-./scripts/build-macos-release-dmgs.sh --package-only
+./gradlew :composeApp:packageReleaseDmg
 
 # Linux
 ./gradlew :composeApp:packageReleaseDeb
 ```
+
+## Build on macOS
+
+Use a native JDK 21 for your Mac's architecture (Apple Silicon or Intel), Xcode
+Command Line Tools, Homebrew, and Python 3 (provided by the Command Line Tools).
+Builds target the architecture of the JDK running Gradle; they are not universal binaries.
+
+```bash
+xcode-select --install  # only if Command Line Tools are not installed
+brew install mpv pkg-config
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+
+# Run from source
+./gradlew :composeApp:run
+
+# Create a local .app, or a release DMG
+./gradlew :composeApp:createReleaseDistributable
+./gradlew :composeApp:packageReleaseDmg
+```
+
+The app is written to `composeApp/build/compose/binaries/main-release/app/Nuvio HTPC.app`;
+DMGs are written under `composeApp/build/compose/binaries/main-release/dmg/`.
+The build compiles the Objective-C++ player bridge, copies libmpv and its linked
+non-system libraries into the app, and rewrites their loader paths. Homebrew is
+needed on the build machine. An existing MPVKit build is also supported via
+`-Pnuvio.mpvkit.dir=/absolute/path/to/MPVKit`.
+
+To install a local build, open its DMG and copy `Nuvio HTPC.app` into Applications.
+Quit an older copy before replacing it. The app's name in Finder and the Dock is
+**Nuvio HTPC**.
+
+### Service configuration and existing installations
+
+`local.properties` is optional for compilation. A checkout without it builds with
+empty service configuration. In particular, email/password login and account sync
+require the correct backend configuration:
+
+```properties
+SUPABASE_URL=https://your-backend.example
+SUPABASE_ANON_KEY=your-backend-public-key
+```
+
+These are backend settings, not your account's email or password. An existing
+official Nuvio account requires the matching backend; an independent backend has
+separate accounts. Rebuild after changing `local.properties`. Other integrations
+also require their corresponding service settings.
+
+Local settings live in `~/Library/Application Support/NuvioHTPC`. When that folder
+does not exist, the app copies existing data from
+`~/Library/Application Support/Nuvio` once. Later changes to the official app's
+local settings are not automatically copied again. Authentication uses Supabase's
+default session storage, so a different app display name alone does not guarantee
+isolated login sessions.
+
+### Signing and notarization
+
+Distribution signing and notarization are optional. The build accepts these
+settings through Gradle properties, environment variables, or `local.properties`:
+
+- `NUVIO_MACOS_SIGNING_IDENTITY`
+- `NUVIO_MACOS_NOTARY_APPLE_ID`
+- `NUVIO_MACOS_NOTARY_TEAM_ID`
+- `NUVIO_MACOS_NOTARY_PASSWORD`
+
+Local builds without these settings are not Developer ID signed or Apple notarized.
+Copied player libraries receive ad-hoc signatures after their loader paths are
+rewritten, as required for loading them on Apple Silicon.
+
+### macOS validation
+
+Run the JNI, bundle-layout, and native-scroll regression tests:
+
+```bash
+./gradlew :composeApp:desktopTest \
+  --tests '*MacosPlayerJniTest' \
+  --tests '*NativeRuntimeLayoutTest' \
+  --tests '*MacosNativeScrollTest'
+```
+
+After building the release app, test real playback with a local video at least
+40 seconds long:
+
+```bash
+python3 scripts/smoke-macos-player.py /path/to/local/video.mp4
+```
+
+This opens the packaged app for 30 seconds with temporary app data, then closes
+the test process. It checks that the player is created once, lifecycle events
+arrive, the playhead advances without jumping backwards, and no missing JNI
+methods or player errors are reported. It prints the location of the test logs.
+This check covers local playback; it does not validate provider-specific network
+streams or measure frame rates while browsing a real catalog.
 
 ## Upstream - Project Structure
 

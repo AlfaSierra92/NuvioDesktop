@@ -44,6 +44,7 @@ internal object NvidiaRtxDriverState {
 
     /** Re-reads in the background (about 50 ms); called per playback attach. */
     fun refreshAsync() {
+        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
         if (!refreshing.compareAndSet(false, true)) return
         scope.launch {
             try {
