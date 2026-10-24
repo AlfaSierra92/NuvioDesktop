@@ -9,6 +9,32 @@ of those is missing; `createDistributable` refuses to package without the DLL.
 
 ## Local engine changes
 
+### macOS
+
+The same pinned, patched checkout below builds as `libnuvio_engine.dylib`:
+
+```bash
+./gradlew :composeApp:buildMacosNuvioEngine \
+  -Pnuvio.engine.sourceDir=/absolute/path/to/nuvio-engine
+```
+
+Use a recent Xcode C++20 toolchain with `std::stop_token` and `std::jthread`.
+With an older Apple SDK, a compatible LLVM/libc++ toolchain can be selected with
+`-Pnuvio.macos.llvmHome=/path/to/llvm` (LLVM 19 needs the experimental-library
+switch, which CMake enables for the engine). CMake and OpenSSL development files
+must be installed. CMake fetches the engine's pinned Boost/libtorrent dependencies.
+
+The build exports both the C API and the desktop JNI symbols, relocates and signs
+the dylib and its dependencies, and namespaces those dependencies so they cannot
+replace the player's libraries. `createDistributable` includes a built runtime in
+`Contents/app/native/engine`. When the checkout is absent the task leaves any
+existing build in place; without an engine runtime the app uses TorrServer.
+
+The macOS smoke tests instantiate the real engine and check versions, JNI errors,
+cache pruning and metadata cancellation without requiring a live torrent swarm.
+
+### Pinned checkout and patches
+
 The checkout must carry `patches/*.patch` on top of the pinned upstream version (v0.1.1):
 
 ```

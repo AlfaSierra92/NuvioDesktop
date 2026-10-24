@@ -1,6 +1,7 @@
 package com.nuvio.app.features.cast
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.build.desktopExecutableDirectories
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -12,22 +13,26 @@ private val ffmpegLog = Logger.withTag("CastFfmpeg")
  * Not bundled: only the Dolby Vision remux needs it, and it is an opt-in beta.
  */
 internal object Ffmpeg {
-    val ffmpeg: File? by lazy { locate("ffmpeg.exe") }
-    val ffprobe: File? by lazy { locate("ffprobe.exe") }
+    val ffmpeg: File? by lazy { locate("ffmpeg") }
+    val ffprobe: File? by lazy { locate("ffprobe") }
     val available: Boolean get() = ffmpeg != null && ffprobe != null
 
-    private fun locate(exe: String): File? {
+    private fun locate(name: String): File? {
+        val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+        val exe = if (windows) "$name.exe" else name
         val dirs = buildList {
-            System.getenv("PATH").orEmpty().split(File.pathSeparatorChar).forEach { add(it.trim()) }
+            desktopExecutableDirectories().forEach { add(it.path) }
+            if (windows) {
             System.getenv("LOCALAPPDATA")?.let { add("$it\\Microsoft\\WinGet\\Links") }
             System.getenv("ProgramFiles")?.let { add("$it\\ffmpeg\\bin") }
             System.getenv("USERPROFILE")?.let { add("$it\\scoop\\shims") }
             add("C:\\ffmpeg\\bin")
+            }
         }
         return dirs.asSequence()
             .filter { it.isNotEmpty() }
             .map { File(it, exe) }
-            .firstOrNull { it.isFile }
+            .firstOrNull { it.isFile && (windows || it.canExecute()) }
             ?.also { ffmpegLog.i { "Found $exe at ${it.absolutePath}" } }
     }
 
@@ -88,12 +93,11 @@ internal object Ffmpeg {
         val command = listOf(exe.absolutePath, "-v", "error") + inputHeaderArgs(headers) + args + url
         return runCatching {
             val process = ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).start()
-            val output = process.inputStream.bufferedReader().readText()
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
                 null
             } else {
-                output
+                process.inputStream.bufferedReader().readText()
             }
         }.onFailure { ffmpegLog.w(it) { "ffprobe failed" } }.getOrNull()
     }

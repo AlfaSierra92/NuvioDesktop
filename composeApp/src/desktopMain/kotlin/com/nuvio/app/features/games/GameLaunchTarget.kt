@@ -197,10 +197,13 @@ internal fun parseShellLink(
         linkInfoPath,
         idListPath,
         relativePath?.takeIf(String::isNotBlank)?.let { relative ->
-            (linkDirectory?.resolve(relative) ?: File(relative)).normalize().absolutePath
+            (linkDirectory?.resolve(relative.replace('\\', File.separatorChar)) ?: File(relative.replace('\\', File.separatorChar))).normalize().absolutePath
         },
     )
-    val targetPath = candidates.firstOrNull { File(it).isFile }
+    val nativeCandidates = candidates.map { path ->
+        if (File.separatorChar == '/' && path.startsWith('/')) File(path.replace('\\', '/')).path else path
+    }
+    val targetPath = nativeCandidates.firstOrNull { File(it).isFile }
         ?: linkInfoPath ?: idListPath ?: candidates.firstOrNull()
     return ShortcutContents(
         targetPath = targetPath,

@@ -2,6 +2,50 @@
 
 Audit del 24 ottobre 2026 sul working tree corrente, incluse le modifiche locali già presenti.
 
+## Aggiornamento del 25 ottobre: priorità medie
+
+Le aree medie sono state implementate nel port macOS. Le dipendenze SVP restano
+esterne; le verifiche hardware e i limiti sono indicati separatamente.
+
+| Punto | Correzione |
+|---|---|
+| 3 | Rilevamento mpv/VLC nelle .app e nei prefissi Homebrew/MacPorts; configurazione manuale dei bundle e catalogo filtrato per OS. |
+| 4 | Tracking mpv tramite socket Unix con timeout e directory privata; conservata la configurazione IPC dell’utente e la named pipe Windows. |
+| 5 | Importazione .app ed eseguibili Unix; lancio dei bundle con `open -W`; corretti i separatori dei collegamenti e i confronti di identità del filesystem. |
+| 6 | ffmpeg/ffprobe nativi, PATH minimo del Finder e prefissi di installazione; attesa del probe limitata nel tempo. |
+| 7 | Schema `nuvio://` nel bundle, OpenURIHandler Java e ripristino della finestra nascosta dopo l’accodamento del link. |
+| 8 | Move/resize del PiP sulla coda AWT; stile e livello della NSWindow salvati e ripristinati senza cambiare le decorazioni/insets di AWT. |
+| 9 | Decoder di anteprime separato e lazy, JPEG a bassa risoluzione, richieste obsolete cancellate e consegna ai controlli WebKit. |
+| 10 | Campioni PCM mono float a 16 kHz tramite libmpv, header e traccia audio della sorgente, limiti temporali e cancellazione alla chiusura. |
+| 11 | Backend GameController con slot stabili e lo stesso formato di input del poller esistente. |
+| 12 | Rilevamento delle bande con il detector già usato su Windows, consenso su più frame, crop gestito separatamente da vf e ripristino all’uscita. |
+| 13 | Now Playing con titolo, episodio, posizione, artwork e stato; comandi remoti play/pause/seek e pulizia della sessione. |
+| 14 | Build, selezione e distribuzione della dylib QuickJS con la patch JNI; stress test dei binding eseguito sul runtime corretto. |
+| 15 | Percorsi POSIX distinti dai percorsi Windows, confronto delle directory tramite identità del filesystem, backslash letterali preservati. |
+| 18 | Build dylib Nuvio Engine con JNI Darwin ed export espliciti; runtime rilocato in una sottocartella e dipendenze con nomi separati da quelle del player. |
+| 19 | Integrazione SVP esterna: discovery delle librerie Mac, plugin .dylib nello script, configurazione della directory/script e controlli abilitati soltanto se il runtime è presente. |
+
+### Verifiche e limiti
+
+- Il test nativo su video sintetico supera tutti i sei controlli: PiP, consegna di JPEG, contenuto e dimensioni dei campioni audio, AutoCrop/ripristino e Now Playing/cleanup.
+- La suite mirata supera 116 test JVM, senza errori, fallimenti o test saltati. Include un processo mpv reale e un server Unix non responsivo, ffprobe reale, JNI del player e Nuvio Engine caricato dalla .app, più regressioni di giochi, libreria, account e portable.
+- Il pacchetto .app è stato verificato per schema URL e runtime inclusi (hash delle sette librerie QuickJS/Engine corrispondenti alla build, nessuna dipendenza del motore verso directory temporanee/Homebrew). La prova di riproduzione locale di 20 secondi supera tutti gli otto controlli: player unico, caricamento, primo frame, avanzamento regolare e assenza di errori/JNI mancanti. I dati della prova sono temporanei e isolati.
+- Non sono stati collegati controller fisici, un receiver o un dispositivo DLNA. Non è stato modificato lo stato degli account personali.
+- SVP Manager e i plugin proprietari non sono installati qui. L’integrazione è condizionata alla loro disponibilità; la qualità/interpolazione SVP non è stata verificata. Serve l’installazione descritta nelle [istruzioni ufficiali SVP macOS](https://www.svp-team.com/docs/mac/), con Manager in esecuzione e una build libmpv compatibile.
+- La selezione automatica dei player Mac copre mpv e VLC; altri player restano disponibili tramite l’handler generico del sistema.
+- Nuvio Engine è stato compilato dalla versione ufficiale v0.1.1 con le quattro patch desktop del repository, usando LLVM 19 da una distribuzione temporanea con checksum verificato. La prova non richiede una swarm torrent esterna.
+
+### Ambiente di build
+
+Il tentativo iniziale di ottenere LLVM con Homebrew è stato interrotto quando ha
+iniziato a compilare ulteriori dipendenze. Homebrew aveva già effettuato il proprio
+autoaggiornamento. LLVM non è stato installato tramite quel comando: per la build
+è stato usato un pacchetto precompilato rilocato in /tmp. Il sorgente del motore e
+le dipendenze di compilazione sono temporanei/output di build; le istruzioni di
+riproduzione sono nel README del motore.
+
+Le sezioni storiche dell’audit rimangono sotto per confrontare il prima e il dopo.
+
 ## Aggiornamento: priorità alte corrette
 
 I punti 1 e 2 sono stati corretti nel sorgente. Su macOS il riavvio usa un helper shell

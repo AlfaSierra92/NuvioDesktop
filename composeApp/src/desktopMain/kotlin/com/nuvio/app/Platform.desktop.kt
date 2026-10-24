@@ -25,6 +25,7 @@ actual fun getPlatform(): Platform = DesktopPlatform()
 internal actual val isIos: Boolean = false
 internal actual val isDesktop: Boolean = true
 internal actual val isWindows: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("win")
+internal actual val desktopSvpSupported: Boolean get() = com.nuvio.app.features.player.desktop.DesktopAnimeSvp.isAvailable
 
 private var activeDesktopDisplayMetrics by mutableStateOf(defaultDesktopDisplayMetrics())
 

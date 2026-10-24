@@ -163,7 +163,7 @@ object GamepadInput {
      * Windows — both cases no-op, and the native library is never touched.
      */
     fun start() {
-        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
+        if (!gamepadSupported()) return
         if (!started.compareAndSet(false, true)) return
         val myGeneration = generation.get()
         thread = Thread({ pollLoop(myGeneration) }, "nuvio-gamepad").apply {

@@ -69,6 +69,7 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.home.RandomPlayGenres
 import com.nuvio.app.features.updater.AppUpdaterPlatform
 import com.nuvio.app.isWindows
+import com.nuvio.app.desktopSvpSupported
 import com.nuvio.app.isDesktop
 import com.nuvio.app.isIos
 import nuvio.composeapp.generated.resources.*
@@ -1554,7 +1555,7 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.AnimeEnhancements,
                 fallbackTitle = resolve(Res.string.settings_playback_desktop_anime_mode),
             ) else null,
-            if (isWindows) PlaybackSearchRow(
+            if (desktopSvpSupported) PlaybackSearchRow(
                 "desktop-anime-svp",
                 resolve(Res.string.settings_playback_desktop_anime_svp),
                 resolve(Res.string.settings_playback_desktop_anime_svp_desc),
@@ -1562,7 +1563,7 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.AnimeEnhancements,
                 fallbackTitle = resolve(Res.string.settings_playback_desktop_anime_mode),
             ) else null,
-            if (isWindows) PlaybackSearchRow(
+            if (desktopSvpSupported) PlaybackSearchRow(
                 "desktop-anime-svp-overlay",
                 resolve(Res.string.settings_playback_desktop_anime_svp_overlay),
                 resolve(Res.string.settings_playback_desktop_anime_svp_overlay_desc),

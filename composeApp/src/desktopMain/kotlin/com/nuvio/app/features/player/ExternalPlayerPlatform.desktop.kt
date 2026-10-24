@@ -1,6 +1,8 @@
 package com.nuvio.app.features.player
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.build.applicationBundleExecutable
+import com.nuvio.app.core.build.desktopExecutableDirectories
 import com.nuvio.app.core.storage.DesktopStorage
 import com.nuvio.app.features.lights.LightsController
 import com.nuvio.app.features.lights.LightsPlaybackSource
@@ -52,7 +54,7 @@ internal actual object ExternalPlayerPlatform {
     private val isWindows = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT).contains("win")
     private val customPlayerStore = DesktopStorage.store("nuvio_external_players")
 
-    private val definitions: List<DesktopPlayerDefinition> = listOf(
+    private val windowsDefinitions: List<DesktopPlayerDefinition> = listOf(
         DesktopPlayerDefinition(
             id = "mpv",
             displayName = "mpv",
@@ -221,6 +223,21 @@ internal actual object ExternalPlayerPlatform {
         ),
     )
 
+    private val definitions: List<DesktopPlayerDefinition> = if (isWindows) windowsDefinitions else {
+        windowsDefinitions.filter { it.id == "mpv" || it.id == "vlc" }.map { original ->
+            val names = if (original.id == "vlc") listOf("VLC", "vlc") else listOf("mpv")
+            val bundle = if (original.id == "vlc") "VLC.app" else "mpv.app"
+            DesktopPlayerDefinition(
+                id = original.id,
+                displayName = original.displayName,
+                candidatePaths = listOf("/Applications/$bundle", "${System.getProperty("user.home")}/Applications/$bundle"),
+                executableNames = names,
+                buildArgs = original.buildArgs,
+                control = original.control,
+            )
+        }
+    }
+
     /** Resolved only when a specific player is needed; startup no longer scans every player. */
     private val resolvedPaths = mutableMapOf<String, String?>()
     private val defaultMediaAssociation: WindowsMediaAssociation? by lazy {
@@ -231,7 +248,7 @@ internal actual object ExternalPlayerPlatform {
         if (resolvedPaths.containsKey(def.id)) return@synchronized resolvedPaths[def.id]
         val customPath = customPlayerStore
             .getString(customPlayerPathKey(def.id))
-            ?.let(::File)
+            ?.let(::File)?.let { applicationBundleExecutable(it, def.executableNames) ?: it }
             ?.takeIf(File::isLaunchableFile)
             ?.absolutePath
         val associatedPath = defaultMediaAssociation
@@ -471,6 +488,7 @@ internal actual object ExternalPlayerPlatform {
         }
         return candidates
             .map(::File)
+            .map { applicationBundleExecutable(it, def.executableNames) ?: it }
             .firstOrNull { it.isLaunchableFile() && def.isUsableInstall(it) }
             ?.absolutePath
     }
@@ -487,10 +505,8 @@ internal actual object ExternalPlayerPlatform {
     }
 
     private fun findOnPath(exe: String): String? {
-        val pathEnv = System.getenv("PATH") ?: return null
-        return pathEnv.split(File.pathSeparatorChar)
-            .asSequence()
-            .map { File(it.trim(), exe) }
+        return desktopExecutableDirectories().asSequence()
+            .map { File(it, exe) }
             .firstOrNull { it.isLaunchableFile() }
             ?.absolutePath
     }
@@ -506,14 +522,16 @@ internal actual object ExternalPlayerPlatform {
             runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
             val chooser = JFileChooser().apply {
                 dialogTitle = "Locate ${def.displayName}"
-                fileSelectionMode = JFileChooser.FILES_ONLY
+                fileSelectionMode = if (isWindows) JFileChooser.FILES_ONLY else JFileChooser.FILES_AND_DIRECTORIES
                 isMultiSelectionEnabled = false
                 if (isWindows) {
                     fileFilter = FileNameExtensionFilter("Applications (*.exe)", "exe")
                 }
             }
             if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-                val selected = chooser.selectedFile?.takeIf(File::isLaunchableFile)
+                val selected = chooser.selectedFile
+                    ?.let { applicationBundleExecutable(it, def.executableNames) ?: it }
+                    ?.takeIf(File::isLaunchableFile)
                 val valid = selected != null && (
                     !isWindows || def.executableNames.any { it.equals(selected.name, ignoreCase = true) }
                 )

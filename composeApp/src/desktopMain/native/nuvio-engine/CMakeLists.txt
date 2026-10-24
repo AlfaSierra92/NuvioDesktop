@@ -58,6 +58,13 @@ endif()
 
 add_subdirectory("${NUVIO_ENGINE_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/nuvio-engine-core")
 
+# libc++ 19 still gates C++20 cooperative cancellation behind its experimental switch.
+# Limit this to the engine: libtorrent does not need the opt-in.
+if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 20)
+    target_compile_options(nuvio_engine PRIVATE -fexperimental-library)
+    target_link_options(nuvio_engine PRIVATE -fexperimental-library)
+endif()
+
 # The JNI bridge is platform-neutral JNI over the C API. jni_bridge.cpp here is the engine repo's
 # platform/android copy with one desktop-specific line (see its header comment).
 target_sources(
@@ -65,9 +72,25 @@ target_sources(
     PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/jni_bridge.cpp"
 )
+if(APPLE)
+    set(NUVIO_JNI_PLATFORM darwin)
+    # Upstream's Apple export list contains only its C API. The desktop library also owns JNI.
+    file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/jni_bridge.cpp" NUVIO_JNI_DECLARATIONS REGEX "^Java_")
+    set(NUVIO_JNI_EXPORTS "${CMAKE_CURRENT_BINARY_DIR}/desktop-jni.exports")
+    file(WRITE "${NUVIO_JNI_EXPORTS}" "")
+    foreach(DECLARATION IN LISTS NUVIO_JNI_DECLARATIONS)
+        string(REGEX REPLACE "\\(.*" "" SYMBOL "${DECLARATION}")
+        file(APPEND "${NUVIO_JNI_EXPORTS}" "_${SYMBOL}\n")
+    endforeach()
+    target_link_options(nuvio_engine PRIVATE "LINKER:-exported_symbols_list,${NUVIO_JNI_EXPORTS}")
+elseif(WIN32)
+    set(NUVIO_JNI_PLATFORM win32)
+else()
+    set(NUVIO_JNI_PLATFORM linux)
+endif()
 target_include_directories(
     nuvio_engine
     PRIVATE
         "${NUVIO_JNI_INCLUDE_DIR}"
-        "${NUVIO_JNI_INCLUDE_DIR}/win32"
+        "${NUVIO_JNI_INCLUDE_DIR}/${NUVIO_JNI_PLATFORM}"
 )

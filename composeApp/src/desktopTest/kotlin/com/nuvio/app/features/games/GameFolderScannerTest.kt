@@ -8,6 +8,22 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GameFolderScannerTest {
+    @Test
+    fun macBundlesAreAtomicGamesAndTheirHelperExecutablesAreNotImported() {
+        val root = Files.createTempDirectory("nuvio-mac-games").toFile()
+        try {
+            val bundle = root.resolve("Hades.app")
+            bundle.resolve("Contents/Info.plist").apply { parentFile.mkdirs(); writeText("plist") }
+            bundle.resolve("Contents/MacOS/Hades").apply { parentFile.mkdirs(); writeText("game"); setExecutable(true) }
+            bundle.resolve("Contents/Frameworks/helper").apply { parentFile.mkdirs(); writeText("helper"); setExecutable(true) }
+            val result = GameFolderScanner.scan(root, emptyList())
+            assertEquals(1, result.candidates.size)
+            assertEquals(bundle.absolutePath, result.candidates.single().executablePath)
+            assertEquals("Hades", result.candidates.single().title)
+            assertEquals(bundle, GameFolderScanner.chooseExecutable(bundle))
+        } finally { root.deleteRecursively() }
+    }
+
     private fun tempRoot(name: String): File = Files.createTempDirectory("nuvio-scan-$name").toFile()
 
     private fun File.exe(relative: String, bytes: Int = 1): File {

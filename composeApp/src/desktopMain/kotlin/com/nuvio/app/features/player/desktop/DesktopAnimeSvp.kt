@@ -18,6 +18,21 @@ internal object DesktopAnimeSvp {
 
     private val exportedPaths = mutableMapOf<String, String?>()
 
+    private val macos = DesktopHostOs.current == DesktopHostOs.MACOS
+    private val customScript: File? get() = System.getProperty("nuvio.svp.script")?.let(::File)?.takeIf(File::isFile)
+    private val macPluginDirectory: File? by lazy {
+        val configured = System.getProperty("nuvio.svp.pluginDir") ?: System.getenv("NUVIO_SVP_PLUGIN_DIR")
+        val roots = listOfNotNull(configured?.let(::File),
+            File("/Applications/SVP 4 Mac.app/Contents/Resources"), File("/Applications/SVP 4.app/Contents/Resources"),
+            File("/opt/homebrew/lib/vapoursynth"), File("/usr/local/lib/vapoursynth"))
+        roots.asSequence().filter(File::isDirectory).flatMap { it.walkTopDown().maxDepth(5).filter(File::isDirectory) }
+            .firstOrNull { dir -> listOf("svpflow1.dylib", "libsvpflow1.dylib", "libsvpflow1_vs.dylib").any { File(dir, it).isFile } &&
+                listOf("svpflow2.dylib", "libsvpflow2.dylib", "libsvpflow2_vs.dylib").any { File(dir, it).isFile } }
+    }
+
+    val isAvailable: Boolean get() = if (!macos) DesktopHostOs.current == DesktopHostOs.WINDOWS
+        else vapourSynthCoreAvailable && (customScript != null || macPluginDirectory != null)
+
     // The script's own diagnostic log. Kept with nuvio.log / nuvio-mpv.log rather than in the
     // temp export directory, so "Open logs folder" surfaces it and log bundles pick it up.
     private val diagnosticLogPath: String by lazy {
@@ -31,6 +46,9 @@ internal object DesktopAnimeSvp {
     // chain failure by dropping the video track entirely (audio-only, black screen), not by
     // skipping the filter. So this must be checked BEFORE handing the filter string to mpv.
     private val vapourSynthCoreAvailable: Boolean by lazy {
+        if (macos) return@lazy listOf("/opt/homebrew/lib", "/usr/local/lib", "/opt/local/lib",
+            "/opt/homebrew/opt/vapoursynth/lib", "/usr/local/opt/vapoursynth/lib")
+            .any { dir -> listOf("libvapoursynth-script.dylib", "libvapoursynth-script.0.dylib").any { File(dir, it).isFile } }
         val candidateNames = listOf("vsscript.dll", "VSScript.dll")
         val searchDirs = buildList {
             NativePlayerBridge.runtimeDllDir()?.let(::add)
@@ -53,9 +71,9 @@ internal object DesktopAnimeSvp {
      * config on every file load, so the next playback start picks up a change with no restart.
      */
     fun vapoursynthArgument(debugOverlay: Boolean): String? {
-        if (!vapourSynthCoreAvailable) return null
+        if (!vapourSynthCoreAvailable || (macos && !isAvailable)) return null
         exportConfig(debugOverlay)
-        val vpyPath = exportedPath("svp_main.vpy") ?: return null
+        val vpyPath = customScript?.absolutePath ?: exportedPath("svp_main.vpy") ?: return null
         // mpv's vf/af suboption parser treats \ as an escape character, so a raw Windows path
         // (backslash-separated) silently corrupts and the whole vf= property set fails with
         // MPV_ERROR_INVALID_PARAMETER — SVP was never actually applying. mpv's own %n% verbatim
@@ -86,6 +104,7 @@ internal object DesktopAnimeSvp {
                 when (line.substringBefore('#').substringBefore('=').trim()) {
                     "DEBUG_OVERLAY" -> "DEBUG_OVERLAY = $debugOverlay"
                     "diag_log" -> "diag_log = $diagnosticLogPath"
+                    "svp_plugin_dir" -> "svp_plugin_dir = ${macPluginDirectory?.absolutePath.orEmpty()}"
                     else -> line
                 }
             }

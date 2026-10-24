@@ -989,8 +989,22 @@ internal class NativePlayerController(
         }
     }
 
+    private var macosSvpOwnsDecoder = false
+    private var decoderBeforeSvp = "auto"
+
+    fun configureMacosSvpDecoder(active: Boolean) {
+        if (DesktopHostOs.current != DesktopHostOs.MACOS || macosSvpOwnsDecoder == active) return
+        if (active) {
+            decoderBeforeSvp = synchronized(pendingMpvProperties) { pendingMpvProperties["hwdec"] }
+                ?: buildDesktopUserMpvOptions(1f).lastOrNull { it.startsWith("hwdec=") }?.substringAfter('=')
+                ?: "auto"
+        }
+        setMpvProperty("hwdec", if (active) "auto-copy" else decoderBeforeSvp)
+        macosSvpOwnsDecoder = active
+    }
+
     fun cycleDesktopAnimeSvpMode() {
-        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
+        if (!DesktopAnimeSvp.isAvailable) return
         val current = PlayerSettingsRepository.uiState.value.desktopAnimeSvpEnabled
         val next = !current
         PlayerSettingsRepository.setDesktopAnimeSvpEnabled(next)
@@ -1736,7 +1750,7 @@ internal class NativePlayerController(
         handle.takeIf { it != 0L }?.let { current -> NativePlayerBridge.setSubtitleDelayMs(current, clamped) }
     }
 
-    override val supportsSpeechSpots: Boolean get() = DesktopHostOs.current == DesktopHostOs.WINDOWS && handle != 0L
+    override val supportsSpeechSpots: Boolean get() = DesktopHostOs.current in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS) && handle != 0L
 
     override fun decodeSpeechSpot(startSeconds: Double, durationSeconds: Double): FloatArray? {
         if (!supportsSpeechSpots) return null
@@ -2385,11 +2399,13 @@ internal fun PlayerControlsState.toControlsJson(
         append(',')
         appendJsonField("desktopAnimeModeLabel", desktopAnimeModeLabel)
         append(',')
+        appendJsonField("desktopSvpSupported", hostOs == DesktopHostOs.WINDOWS || (hostOs == DesktopHostOs.MACOS && DesktopAnimeSvp.isAvailable))
+        append(',')
         appendJsonField("windowsVideoEnhancementsSupported", hostOs == DesktopHostOs.WINDOWS)
         append(',')
-        appendJsonField("autoCropSupported", hostOs == DesktopHostOs.WINDOWS)
+        appendJsonField("autoCropSupported", hostOs in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS))
         append(',')
-        appendJsonField("desktopAnimeSvpEnabled", desktopAnimeSvpEnabled && hostOs == DesktopHostOs.WINDOWS)
+        appendJsonField("desktopAnimeSvpEnabled", desktopAnimeSvpEnabled && (hostOs == DesktopHostOs.WINDOWS || (hostOs == DesktopHostOs.MACOS && DesktopAnimeSvp.isAvailable)))
         append(',')
         appendJsonField("rtxVsrEnabled", rtxVsrEnabled && hostOs == DesktopHostOs.WINDOWS)
         append(',')
@@ -2399,7 +2415,7 @@ internal fun PlayerControlsState.toControlsJson(
         append(',')
         appendJsonField("activeSubtitleLabel", activeSubtitleLabel)
         append(',')
-        appendJsonField("seekThumbnailsEnabled", seekThumbnailsEnabled && hostOs == DesktopHostOs.WINDOWS)
+        appendJsonField("seekThumbnailsEnabled", seekThumbnailsEnabled && hostOs in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS))
         append(',')
         appendJsonField("seekrVttUrl", seekrVttUrl)
         append(',')

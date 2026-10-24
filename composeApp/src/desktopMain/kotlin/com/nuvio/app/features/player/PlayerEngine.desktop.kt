@@ -1615,6 +1615,7 @@ private fun applyDesktopAnimeProfile(
         )
     } else null
     val svpActive = svpFilter != null
+    controller.configureMacosSvpDecoder(svpActive)
 
     // This function is the single owner of the mpv `vf` chain. NVIDIA RTX VSR and RTX True HDR
     // are both d3d11vpp sub-options; they must be set here so a profile rebuild doesn't wipe them.

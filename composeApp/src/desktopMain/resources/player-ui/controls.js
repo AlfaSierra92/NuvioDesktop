@@ -318,6 +318,7 @@ let state = {
   desktopColorProfileLabel: "Neutral",
   desktopAnimeModeLabel: "Off",
   windowsVideoEnhancementsSupported: false,
+  desktopSvpSupported: false,
   autoCropSupported: false,
   desktopAnimeSvpEnabled: false,
   rtxVsrEnabled: false,
@@ -770,8 +771,9 @@ const setIconHref = (icon, href) => {
   if (icon && icon.getAttribute("href") !== href) icon.setAttribute("href", href);
 };
 
-const windowsVideoCommands = new Set(["keyboardCycleAnimeSvp", "toggleRtxVsr", "toggleRtxTrueHdr"]);
+const windowsVideoCommands = new Set(["toggleRtxVsr", "toggleRtxTrueHdr"]);
 const send = (type, value = 0) => {
+  if (type === "keyboardCycleAnimeSvp" && !state.desktopSvpSupported) return;
   if (windowsVideoCommands.has(type) && !state.windowsVideoEnhancementsSupported) return;
   if (type === "selectResizeMode" && value === 3 && !state.autoCropSupported) return;
   if ((type === "toggle" || type === "keyboardToggle") && !state.isLocked) notePlayToggleIntent();
@@ -2308,7 +2310,7 @@ const contextMenuItems = [
         { label: "Adjust custom color…", action: "colorGradePanel" },
       ] },
       { label: "Anime shader", dynamicKey: "animeShaders", children: [] },
-      { label: "SVP interpolation", capability: "windowsVideoEnhancementsSupported", action: "send:keyboardCycleAnimeSvp", toggleKey: "desktopAnimeSvpEnabled" },
+      { label: "SVP interpolation", capability: "desktopSvpSupported", action: "send:keyboardCycleAnimeSvp", toggleKey: "desktopAnimeSvpEnabled" },
       // This session only; the saved defaults stay in Settings > Playback. Neither runs with SVP.
       { label: "RTX Super Resolution", capability: "windowsVideoEnhancementsSupported", action: "send:toggleRtxVsr", toggleKey: "rtxVsrEnabled" },
       { label: "RTX True HDR", capability: "windowsVideoEnhancementsSupported", action: "send:toggleRtxTrueHdr", toggleKey: "rtxTrueHdrEnabled" },

@@ -1,6 +1,7 @@
 package com.nuvio.app.features.games
 
 import java.io.File
+import java.nio.file.Files
 
 /**
  * One game a folder scan found: the folder, the executable chosen for it, and what it should be
@@ -42,11 +43,11 @@ object GameFolderScanner {
     fun scan(root: File, existing: List<GameEntry>): GameFolderScanResult {
         val gamesDirectory = gamesDirectoryFor(root)
         val manifests = steamManifestsBeside(gamesDirectory)
-        val existingPaths = existing.mapNotNull { it.executablePath?.lowercase() }.toSet()
+        val existingPaths = existing.mapNotNull { it.executablePath?.let(::gamePathIdentity) }.toSet()
         val existingAppIds = existing.mapNotNull { it.steamAppId }.toSet()
         val existingTitles = existing.map { it.title.normalizedGameTitle() }.toSet()
 
-        val gameFolders = gamesDirectory
+        val gameFolders = if (gamesDirectory.isMacGameBundle()) listOf(gamesDirectory) else gamesDirectory
             .listFiles { file: File -> file.isDirectory && !file.isHidden && file.name !in IGNORED_FOLDERS }
             ?.sortedBy { it.name.lowercase() }
             .orEmpty()
@@ -56,8 +57,11 @@ object GameFolderScanner {
         var skippedExisting = 0
         var withoutExecutable = 0
         fun keepUnlessPresent(candidate: GameFolderCandidate, resolvedPath: String?): GameFolderCandidate? {
-            val alreadyPresent = candidate.executablePath.lowercase() in existingPaths ||
-                (resolvedPath != null && resolvedPath.lowercase() in existingPaths) ||
+            val alreadyPresent = gamePathIdentity(candidate.executablePath) in existingPaths ||
+                (resolvedPath != null && gamePathIdentity(resolvedPath) in existingPaths) ||
+                existing.any { entry -> entry.executablePath?.let { path ->
+                    runCatching { Files.isSameFile(File(path).toPath(), File(candidate.executablePath).toPath()) }.getOrDefault(false)
+                } == true } ||
                 (candidate.steamAppId != null && candidate.steamAppId in existingAppIds) ||
                 candidate.title.normalizedGameTitle() in existingTitles
             if (alreadyPresent) skippedExisting += 1
@@ -91,7 +95,8 @@ object GameFolderScanner {
             val candidate = GameFolderCandidate(
                 folder = folder,
                 executablePath = executable.absolutePath,
-                title = manifest?.name?.takeIf(String::isNotBlank) ?: folderTitle(folder.name),
+                title = manifest?.name?.takeIf(String::isNotBlank)
+                    ?: folderTitle(if (folder.isMacGameBundle()) folder.nameWithoutExtension else folder.name),
                 steamAppId = manifest?.appId,
             )
             keepUnlessPresent(candidate, resolvedPath = null)
@@ -152,6 +157,7 @@ object GameFolderScanner {
 
     /** The executable most likely to be the game itself, or null when the folder has none. */
     internal fun chooseExecutable(folder: File): File? {
+        if (folder.isMacGameBundle()) return folder
         val found = mutableListOf<ExecutableFind>()
         collectExecutables(folder, depth = 0, into = found)
         if (found.isEmpty()) return null
@@ -170,8 +176,11 @@ object GameFolderScanner {
         val children = directory.listFiles() ?: return
         children.forEach { child ->
             when {
+                child.isMacGameBundle() -> into.add(ExecutableFind(child, depth))
                 child.isFile -> {
-                    if (child.extension.equals("exe", ignoreCase = true) && !isHelperExecutable(child.name)) {
+                    val runnable = child.extension.equals("exe", ignoreCase = true) ||
+                        (!System.getProperty("os.name").startsWith("Windows") && child.canExecute())
+                    if (runnable && !isHelperExecutable(child.name)) {
                         into += ExecutableFind(child, depth)
                     }
                 }

@@ -1,6 +1,9 @@
 package com.nuvio.app.features.player
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.core.network.UnixIpcConnection
+import java.nio.file.Files
+import java.nio.file.Path
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.EOFException
@@ -73,7 +76,10 @@ internal fun prepareExternalPlayerChannel(
         // A pipe the user already configured (SVP and similar tools connect to it) is reused
         // rather than overridden: mpv serves only one, and replacing it would break that tool.
         val configured = configuredMpvIpcPipe(exe, isMpvNet)
-        val pipe = configured ?: "\\\\.\\pipe\\nuvio-mpv-${randomToken(8)}"
+        val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+        val ownedDirectory = if (configured == null && !windows) Files.createTempDirectory(Path.of("/tmp"), "nuvio-mpv-") else null
+        val pipe = configured ?: ownedDirectory?.resolve("ipc")?.toString()
+            ?: "\\\\.\\pipe\\nuvio-mpv-${randomToken(8)}"
         ExternalPlayerChannel(
             launchArgs = buildList {
                 if (configured == null) add("--input-ipc-server=$pipe")
@@ -81,7 +87,7 @@ internal fun prepareExternalPlayerChannel(
                 // nothing for this launch to watch.
                 if (isMpvNet) add("--process-instance=multi")
             },
-            reader = MpvIpcReader(pipe),
+            reader = MpvIpcReader(pipe, ownedDirectory),
         )
     }
     ExternalPlayerControl.Vlc -> {
@@ -173,36 +179,37 @@ private val ipcJson = Json { ignoreUnknownKeys = true }
  * handle cannot be read and written concurrently (a pending read blocks the write), so nothing
  * here subscribes to events and waits on them.
  */
-private class MpvIpcReader(private val pipePath: String) : ExternalPlayerReader {
+internal class MpvIpcReader(private val pipePath: String, private val ownedDirectory: Path? = null) : ExternalPlayerReader {
     private var pipe: RandomAccessFile? = null
+    private var unix: UnixIpcConnection? = null
     private var nextRequestId = 1
 
     override fun read(): ExternalPlaybackSample? {
-        val handle = pipe ?: try {
-            RandomAccessFile(pipePath, "rw").also { pipe = it }
-        } catch (_: FileNotFoundException) {
-            return null
-        }
+        val windows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+        if (windows && pipe == null) pipe = RandomAccessFile(pipePath, "rw")
+        if (!windows && unix == null) unix = UnixIpcConnection(pipePath, 2_000)
         try {
-            val positionSeconds = handle.property("time-pos")?.doubleOrNull ?: return null
-            val durationSeconds = handle.property("duration")?.doubleOrNull ?: return null
-            val paused = handle.property("pause")?.booleanOrNull ?: false
+            val positionSeconds = property("time-pos")?.doubleOrNull ?: return null
+            val durationSeconds = property("duration")?.doubleOrNull ?: return null
+            val paused = property("pause")?.booleanOrNull ?: false
             return ExternalPlaybackSample(
                 positionMs = (positionSeconds * 1000.0).toLong(),
                 durationMs = (durationSeconds * 1000.0).toLong(),
                 isPaused = paused,
             )
         } catch (error: IOException) {
-            close()
+            runCatching { pipe?.close() }; pipe = null
+            runCatching { unix?.close() }; unix = null
             throw error
         }
     }
 
-    private fun RandomAccessFile.property(name: String): JsonPrimitive? {
+    private fun property(name: String): JsonPrimitive? {
         val id = nextRequestId++
-        write("{\"command\":[\"get_property\",\"$name\"],\"request_id\":$id}\n".toByteArray(Charsets.UTF_8))
+        val bytes = "{\"command\":[\"get_property\",\"$name\"],\"request_id\":$id}\n".toByteArray(Charsets.UTF_8)
+        pipe?.write(bytes) ?: unix!!.write(bytes)
         while (true) {
-            val line = readUtf8Line() ?: throw EOFException("mpv closed its IPC pipe")
+            val line = unix?.readLine() ?: pipe?.readUtf8Line() ?: throw EOFException("mpv closed its IPC pipe")
             val reply = runCatching { ipcJson.parseToJsonElement(line).jsonObject }.getOrNull() ?: continue
             if (reply["request_id"]?.jsonPrimitive?.intOrNull != id) continue
             if (reply["error"]?.jsonPrimitive?.content != "success") return null
@@ -213,6 +220,11 @@ private class MpvIpcReader(private val pipePath: String) : ExternalPlayerReader 
     override fun close() {
         runCatching { pipe?.close() }
         pipe = null
+        runCatching { unix?.close() }
+        unix = null
+        ownedDirectory?.let { directory ->
+            runCatching { Files.deleteIfExists(directory.resolve("ipc")); Files.deleteIfExists(directory) }
+        }
     }
 }
 
@@ -233,7 +245,12 @@ private fun RandomAccessFile.readUtf8Line(): String? {
 private fun configuredMpvIpcPipe(executable: File, isMpvNet: Boolean): String? {
     val appData = System.getenv("APPDATA")
     val candidates = buildList {
-        executable.parentFile?.let { dir -> add(File(dir, "portable_config\\mpv.conf")) }
+        executable.parentFile?.let { dir -> add(File(dir, "portable_config/mpv.conf")) }
+        if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+            val home = File(System.getProperty("user.home"))
+            add(File(System.getenv("XDG_CONFIG_HOME") ?: File(home, ".config").path, "mpv/mpv.conf"))
+            add(File(home, ".mpv/mpv.conf"))
+        }
         if (appData != null) {
             add(File(appData, if (isMpvNet) "mpv.net\\mpv.conf" else "mpv\\mpv.conf"))
         }
@@ -252,6 +269,9 @@ private fun configuredMpvIpcPipe(executable: File, isMpvNet: Boolean): String? {
         ?.trim('"')
         ?.takeIf { it.isNotBlank() }
         ?: return null
+    if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        return if (value.startsWith("~/")) File(System.getProperty("user.home"), value.drop(2)).path else value
+    }
     return if (value.startsWith("\\\\.\\pipe\\", ignoreCase = true)) value else "\\\\.\\pipe\\$value"
 }
 

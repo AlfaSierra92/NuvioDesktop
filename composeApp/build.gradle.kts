@@ -362,7 +362,7 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
           -o ${shellQuote(macosPlayerBridgeOutputFile.absolutePath)} \
           -I${shellQuote("$macosPlayerBridgeJavaHome/include")} \
           -I${shellQuote("$macosPlayerBridgeJavaHome/include/darwin")} \
-          -framework CoreServices -framework CoreGraphics -framework AppKit -framework WebKit -framework Metal -framework Security \
+          -framework CoreServices -framework CoreGraphics -framework AppKit -framework WebKit -framework Metal -framework Security -framework GameController -framework MediaPlayer \
           -framework IOKit -framework OpenGL -framework QuartzCore \
           ${'$'}(pkg-config --cflags --libs mpv)
         """.trimIndent(),
@@ -395,6 +395,8 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
           $mpvKitGeneratedLibSearchArgs \
           -L"${'$'}{SWIFT_LIB}" \
           -L/usr/lib/swift \
+          -framework GameController \
+          -framework MediaPlayer \
           -framework CoreServices \
           -framework CoreGraphics \
           -framework AppKit \
@@ -417,6 +419,7 @@ val buildMacosPlayerBridge = tasks.register<Exec>("buildMacosPlayerBridge") {
     enabled = isMacHost
     inputs.file(macosPlayerBridgeSource)
     inputs.file(layout.projectDirectory.file("src/desktopMain/native/macos/hdr_output.h"))
+    inputs.file(layout.projectDirectory.file("src/desktopMain/native/macos/crop_detection.h"))
     if (mpvKitLibmpvStaticLib.exists()) {
         inputs.file(mpvKitLibmpvStaticLib)
     }
@@ -872,6 +875,66 @@ val buildWindowsQuickJs = tasks.register("buildWindowsQuickJs") {
     }
 }
 
+val macosQuickJsOutput = layout.buildDirectory.file("native/macos/libquickjs.dylib")
+val buildMacosQuickJs = tasks.register<Exec>("buildMacosQuickJs") {
+    enabled = isMacHost
+    inputs.dir(quickJsSourceDir)
+    inputs.file(rootProject.file("scripts/build-macos-quickjs.sh"))
+    outputs.file(macosQuickJsOutput)
+    commandLine("/bin/sh", rootProject.file("scripts/build-macos-quickjs.sh").absolutePath,
+        quickJsSourceDir.asFile.absolutePath, providers.systemProperty("java.home").get(), macosQuickJsOutput.get().asFile.absolutePath)
+}
+
+val macosEngineOutput = layout.buildDirectory.file("native/macos/libnuvio_engine.dylib")
+val macosEngineRuntime = layout.buildDirectory.dir("native/macos-engine-runtime")
+val buildMacosNuvioEngine = tasks.register("buildMacosNuvioEngine") {
+    enabled = isMacHost
+    notCompatibleWithConfigurationCache("Builds and relocates the optional host-local engine runtime.")
+    inputs.dir(nuvioEngineCMakeProject)
+    outputs.file(macosEngineOutput)
+    outputs.upToDateWhen { false }
+    doLast {
+        val source = nuvioEngineSourceDir
+        if (!source.resolve("CMakeLists.txt").isFile) {
+            logger.lifecycle("Nuvio Engine checkout absent; using TorrServer. Configure -Pnuvio.engine.sourceDir to build the macOS backend.")
+            return@doLast
+        }
+        val cmake = listOf("/opt/homebrew/bin/cmake", "/usr/local/bin/cmake", "/usr/bin/cmake").map(::File).firstOrNull(File::isFile)
+            ?: throw GradleException("Install CMake to build Nuvio Engine on macOS.")
+        val work = layout.buildDirectory.dir("native/nuvio-engine/macos").get().asFile
+        val llvmHome = providers.gradleProperty("nuvio.macos.llvmHome").orNull?.let(::File)
+            ?: listOf(File("/opt/homebrew/opt/llvm"), File("/usr/local/opt/llvm")).firstOrNull { it.resolve("bin/clang++").isFile }
+        val llvmArgs = if (llvmHome != null) listOf(
+            "-DCMAKE_C_COMPILER=" + llvmHome.resolve("bin/clang").absolutePath,
+            "-DCMAKE_CXX_COMPILER=" + llvmHome.resolve("bin/clang++").absolutePath,
+            "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -nostdinc++ -isystem ${llvmHome.resolve("include/c++/v1").absolutePath} -D_LIBCPP_DISABLE_AVAILABILITY",
+            "-DCMAKE_SHARED_LINKER_FLAGS=-L${llvmHome.resolve("lib/c++").absolutePath} -Wl,-rpath,${llvmHome.resolve("lib/c++").absolutePath}",
+            "-DCMAKE_EXE_LINKER_FLAGS=-L${llvmHome.resolve("lib/c++").absolutePath} -Wl,-rpath,${llvmHome.resolve("lib/c++").absolutePath}",
+        ) else emptyList()
+        val cache = work.resolve("CMakeCache.txt")
+        if (llvmHome != null && cache.isFile && !cache.readText().contains(llvmHome.resolve("bin/clang++").absolutePath)) {
+            cache.delete()
+            work.resolve("CMakeFiles").deleteRecursively()
+        }
+        fun runCommand(vararg command: String) {
+            val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+            process.inputStream.bufferedReader().useLines { lines -> lines.forEach { logger.lifecycle(it) } }
+            check(process.waitFor() == 0) { "Nuvio Engine macOS build failed" }
+        }
+        runCommand(cmake.path, "-S", nuvioEngineCMakeProject.asFile.absolutePath, "-B", work.absolutePath,
+            "-DNUVIO_ENGINE_ROOT=" + source.absolutePath, "-DNUVIO_JNI_INCLUDE_DIR=" + nuvioEngineJniIncludeDir.absolutePath,
+            "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0", "-DCMAKE_OSX_ARCHITECTURES=$macosPlayerBridgeArch",
+            "-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/openssl@3;/usr/local/opt/openssl@3", *llvmArgs.toTypedArray())
+        runCommand(cmake.path, "--build", work.absolutePath, "--parallel", "4")
+        val library = work.walkTopDown().firstOrNull { it.isFile && it.name == "libnuvio_engine.dylib" }
+            ?: throw GradleException("Nuvio Engine produced no dylib")
+        library.copyTo(macosEngineOutput.get().asFile.apply { parentFile.mkdirs() }, overwrite = true)
+
+        runCommand("/usr/bin/python3", rootProject.file("scripts/bundle-macos-runtime.py").absolutePath,
+            macosEngineOutput.get().asFile.absolutePath, macosEngineRuntime.get().asFile.absolutePath, "nuvio-engine-")
+    }
+}
+
 val windowsPlaybackStartupTestSource = layout.projectDirectory.file("src/desktopTest/native/windows/playback_startup_test.cpp")
 val windowsPlaybackStartupTestOutput = layout.buildDirectory.file("native/windows/player_startup_test.exe")
 val buildWindowsPlaybackStartupTests = tasks.register<Exec>("buildWindowsPlaybackStartupTests") {
@@ -1089,7 +1152,7 @@ val desktopResourcesSourceDir = layout.projectDirectory.dir("src/desktopMain/res
 
 tasks.withType<Jar>().configureEach {
     if (isMacHost && name == "desktopJar") {
-        dependsOn(prepareMacosPlayerRuntime)
+        dependsOn(prepareMacosPlayerRuntime, buildMacosQuickJs, buildMacosNuvioEngine)
         from(macosPlayerBridgeOutput) {
             into("native/macos")
         }
@@ -1127,16 +1190,20 @@ tasks.withType<Jar>().configureEach {
 
 if (isMacHost) {
     tasks.withType<JavaExec>().matching { it.name in setOf("run", "runRelease", "desktopRun") }.configureEach {
-        dependsOn(prepareMacosPlayerRuntime)
+        dependsOn(prepareMacosPlayerRuntime, buildMacosQuickJs, buildMacosNuvioEngine)
     }
     listOf("createDistributable" to "main", "createReleaseDistributable" to "main-release").forEach { (taskName, flavor) ->
         tasks.matching { it.name == taskName }.configureEach {
-            dependsOn(prepareMacosPlayerRuntime)
+            dependsOn(prepareMacosPlayerRuntime, buildMacosQuickJs, buildMacosNuvioEngine)
             inputs.dir(layout.buildDirectory.dir("native/macos-runtime"))
+            inputs.file(macosQuickJsOutput)
+            inputs.files(macosEngineRuntime.map { fileTree(it) })
             notCompatibleWithConfigurationCache("Stages the macOS native player in the app bundle.")
             doLast {
                 copy {
                     from(layout.buildDirectory.dir("native/macos-runtime"))
+                    from(macosQuickJsOutput)
+                    from(macosEngineRuntime) { into("engine"); exclude("runtime-files.txt") }
                     into(layout.buildDirectory.dir("compose/binaries/$flavor/app/$desktopPackageName.app/Contents/app/native"))
                 }
             }
@@ -1780,7 +1847,7 @@ kotlin {
 // opt-in: run them with `-Pnuvio.focusTests` before shipping input changes, and on CI where nobody
 // is at the keyboard.
 tasks.withType<Test>().configureEach {
-    if (isMacHost) dependsOn(prepareMacosPlayerRuntime, testMacosHdrPolicy)
+    if (isMacHost) dependsOn(prepareMacosPlayerRuntime, testMacosHdrPolicy, buildMacosQuickJs, buildMacosNuvioEngine)
     // DesktopStorage would otherwise read and write the real %LOCALAPPDATA%/NuvioHTPC, including
     // moving its settings into account folders the first time a test opens a store.
     val testDataDir = layout.buildDirectory.dir("test-data-dir").get().asFile
@@ -1795,7 +1862,7 @@ tasks.withType<Test>().configureEach {
     val quickJsDll = quickJsOutput
     inputs.files(quickJsDll).optional()
     doFirst {
-        quickJsDll.get().asFile.takeIf(File::isFile)?.let { dll ->
+        (if (isMacHost) macosQuickJsOutput else quickJsDll).get().asFile.takeIf(File::isFile)?.let { dll ->
             systemProperty("com.dokar.quickjs.library.path", dll.parentFile.absolutePath)
         }
     }
@@ -1951,6 +2018,12 @@ compose.desktop {
                 entitlementsFile.set(project.file("src/desktopMain/resources/macos/nuvio.entitlements.plist"))
                 infoPlist {
                     extraKeysRawXml = """
+                        <key>CFBundleURLTypes</key>
+                        <array><dict>
+                            <key>CFBundleURLName</key><string>com.nuvio.media.desktop</string>
+                            <key>CFBundleURLSchemes</key><array><string>nuvio</string></array>
+                            <key>CFBundleTypeRole</key><string>Viewer</string>
+                        </dict></array>
                         <key>NSAppleEventsUsageDescription</key>
                         <string>Nuvio requests shutdown when you enable automatic shutdown and its idle countdown finishes.</string>
                     """.trimIndent()

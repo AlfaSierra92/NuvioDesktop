@@ -8,6 +8,9 @@
 #import <OpenGL/gl3.h>
 #import <QuartzCore/QuartzCore.h>
 #import <WebKit/WebKit.h>
+#import <GameController/GameController.h>
+#import <MediaPlayer/MediaPlayer.h>
+#import <objc/runtime.h>
 
 #include <jni.h>
 #include <mpv/client.h>
@@ -15,6 +18,9 @@
 #include <mpv/render_gl.h>
 
 #include <atomic>
+#include <algorithm>
+#include <chrono>
+#include "crop_detection.h"
 #include <cmath>
 #include <dlfcn.h>
 #include <mutex>
@@ -25,6 +31,7 @@
 @class PlayerMetalView;
 @class MpvWebPlayer;
 @class NuvioPlayerOpenGLLayer;
+static __weak MpvWebPlayer *nuvioMediaOwner;
 
 @interface PlayerMetalView : NSView
 - (double)edrMax;
@@ -74,6 +81,13 @@
                         eventSink:(jobject)eventSink
                       eventMethod:(jmethodID)eventMethod;
 - (void)shutdown;
+- (void)requestSeekThumbnail:(long long)positionMs;
+- (int)decodeSpeechSpot:(double)start duration:(double)duration output:(NSString *)output;
+- (double)speechSourceBytesPerSecond;
+- (void)setMediaTitle:(NSString *)title subtitle:(NSString *)subtitle artwork:(NSString *)artwork;
+- (void)checkAutoCrop;
+- (void)updateNowPlayingPosition:(double)position duration:(double)duration paused:(BOOL)paused;
+
 - (void)updateControlsJson:(NSString *)controlsJson;
 - (void)runJavaScript:(NSString *)script;
 - (void)setCursorHidden:(BOOL)hidden;
@@ -1007,6 +1021,22 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 }
 
 @implementation MpvWebPlayer {
+    NSString *_probeSource;
+    NSString *_probeAudioSource;
+    NSArray<NSString *> *_probeHeaders;
+    dispatch_queue_t _thumbnailQueue;
+    std::atomic_bool _stopping;
+    std::atomic<uint64_t> _thumbnailGeneration;
+    std::atomic<double> _sourceBytesPerSecond;
+    std::atomic<int64_t> _selectedAudioId;
+    NSMutableArray *_remoteCommandTargets;
+    BOOL _ownsMediaSession;
+    NSUInteger _artworkGeneration;
+    BOOL _autoCrop;
+    int _autoCropChecks;
+    AutoCropBars _cropCandidate;
+    AutoCropBars _appliedCrop;
+    NSTimeInterval _nextCropCheck;
     NSView *_hostView;
     PlayerMetalView *_videoView;
     WKWebView *_webView;
@@ -1145,6 +1175,14 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         [self focusControlsWebViewIfNeeded];
     });
 
+    _stopping.store(false);
+    _thumbnailGeneration.store(0);
+    _sourceBytesPerSecond.store(-1);
+    _selectedAudioId.store(0);
+    _probeSource = [sourceUrl copy];
+    _probeAudioSource = [audioSourceUrl copy];
+    _probeHeaders = [headerLines copy];
+    _thumbnailQueue = dispatch_queue_create("com.nuvio.thumbnail", DISPATCH_QUEUE_SERIAL);
     [self startMpvWithSource:sourceUrl
               audioSourceUrl:audioSourceUrl
                  headerLines:headerLines
@@ -1615,6 +1653,10 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
             BOOL ended = [self rawIsEnded];
             BOOL loading = [self rawLoadingWithPaused:paused ended:ended duration:duration];
             double speed = [self rawSpeed];
+            self->_selectedAudioId.store((int64_t)[self doubleProperty:"aid" fallback:0]);
+            double size = [self doubleProperty:"file-size" fallback:0];
+            self->_sourceBytesPerSecond.store(duration > 0 && size > 0 ? size / duration : -1);
+            if (self->_autoCrop && CFAbsoluteTimeGetCurrent() >= self->_nextCropCheck) [self checkAutoCrop];
             NSString *audioTracks = [self audioTracksJson] ?: @"[]";
             NSString *subtitleTracks = [self subtitleTracksJson] ?: @"[]";
             NSString *gamma = [[self stringProperty:"video-params/gamma" fallback:@""] lowercaseString];
@@ -1637,6 +1679,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 for (NSDictionary *event in events) {
                     [self sendPlayerEvent:event[@"type"] value:[event[@"value"] doubleValue]];
                 }
+                [self updateNowPlayingPosition:position duration:duration paused:paused];
                 [self applyHdrForPolledGamma:gamma primaries:primaries reason:@"sync" force:NO];
                 NSString *script = [NSString stringWithFormat:
                     @"window.playerUpdate({duration:%0.3f,position:%0.3f,buffered:%0.3f,paused:%@,loading:%@,audioTracks:%@,subtitleTracks:%@})",
@@ -1807,6 +1850,19 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 }
 
 - (void)shutdown {
+    _stopping.store(true);
+    ++_thumbnailGeneration;
+    if (_ownsMediaSession) {
+        for (NSArray *pair in _remoteCommandTargets) [(MPRemoteCommand *)pair[0] removeTarget:pair[1]];
+        _remoteCommandTargets = nil;
+        if (nuvioMediaOwner == self) {
+            MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = nil;
+            MPNowPlayingInfoCenter.defaultCenter.playbackState = MPNowPlayingPlaybackStateStopped;
+            nuvioMediaOwner = nil;
+        }
+        _ownsMediaSession = NO;
+        ++_artworkGeneration;
+    }
     [self setCursorHidden:NO];
     _pendingScripts = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -1907,7 +1963,8 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 
 - (void)setResizeMode:(int)mode {
     if (!_mpv) return;
-    // Fill stretches; Zoom preserves the aspect ratio and crops the edges.
+    // Fit/Fill/Zoom also disable the managed crop without touching the user's vf chain.
+
     NSString *keepaspect = mode == 1 ? @"no" : @"yes";
     NSString *panscan = mode == 2 ? @"1.0" : @"0.0";
 
@@ -1924,6 +1981,12 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         if (!mpv) {
             return;
         }
+        self->_autoCrop = mode == 3;
+        self->_autoCropChecks = 0;
+        self->_cropCandidate = AutoCropBars{};
+        self->_appliedCrop = AutoCropBars{};
+        self->_nextCropCheck = 0;
+        mpv_set_property_string(mpv, "video-crop", "");
         mpv_set_property_string(mpv, "keepaspect", keepaspect.UTF8String);
         mpv_set_property_string(mpv, "panscan", panscan.UTF8String);
         mpv_set_property_string(mpv, "video-unscaled", "no");
@@ -2446,6 +2509,240 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     }
 }
 
+// Workers use independent libmpv connections; no main/UI queue is blocked by network I/O.
+- (mpv_handle *)newProbe {
+    if (_stopping.load() || !_probeSource.length) return nullptr;
+    mpv_handle *probe = mpv_create();
+    if (!probe) return nullptr;
+    for (const auto &option : std::vector<std::pair<const char *, const char *>>{
+        {"config", "no"}, {"terminal", "no"}, {"load-scripts", "no"}, {"ytdl", "no"},
+        {"input-default-bindings", "no"}, {"osc", "no"}, {"cache", "no"},
+        {"network-timeout", "10"}, {"demuxer-readahead-secs", "1"}, {"demuxer-max-bytes", "8MiB"}}) {
+        mpv_set_option_string(probe, option.first, option.second);
+    }
+    std::string headers;
+    for (NSString *line in _probeHeaders) {
+        if (!headers.empty()) headers += ',';
+        for (char ch : std::string(line.UTF8String)) {
+            if (ch == ',' || ch == '\\') headers += '\\';
+            headers += ch;
+        }
+    }
+    if (!headers.empty()) mpv_set_option_string(probe, "http-header-fields", headers.c_str());
+    return probe;
+}
+
+- (double)speechSourceBytesPerSecond {
+    if (![_probeSource hasPrefix:@"http://"] && ![_probeSource hasPrefix:@"https://"]) return -1;
+    return _sourceBytesPerSecond.load();
+}
+
+- (int)decodeSpeechSpot:(double)start duration:(double)duration output:(NSString *)output {
+    if (!std::isfinite(start) || !std::isfinite(duration) || duration <= 0 || duration > 120 || !output.length) return -1;
+    mpv_handle *probe = [self newProbe];
+    if (!probe) return -1;
+    for (const auto &option : std::vector<std::pair<const char *, const char *>>{
+        {"vid", "no"}, {"sid", "no"}, {"audio-display", "no"}, {"audio-spdif", ""}, {"af", ""},
+        {"ao", "pcm"}, {"ao-pcm-waveheader", "no"}, {"audio-samplerate", "16000"},
+        {"audio-channels", "mono"}, {"audio-format", "float"}, {"hr-seek", "yes"}, {"keep-open", "no"}}) {
+        mpv_set_option_string(probe, option.first, option.second);
+    }
+    mpv_set_option_string(probe, "ao-pcm-file", output.fileSystemRepresentation);
+    mpv_set_option_string(probe, "start", std::to_string(std::max(0.0, start)).c_str());
+    mpv_set_option_string(probe, "end", std::to_string(std::max(0.0, start) + duration).c_str());
+    int64_t aid = _selectedAudioId.load();
+    if (aid > 0 && !_probeAudioSource.length) mpv_set_option_string(probe, "aid", std::to_string(aid).c_str());
+    NSString *source = _probeAudioSource.length ? _probeAudioSource : _probeSource;
+    int result = -1;
+    if (mpv_initialize(probe) >= 0) {
+        const char *load[] = {"loadfile", source.UTF8String, nullptr};
+        if (mpv_command(probe, load) >= 0) {
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
+            while (!_stopping.load() && std::chrono::steady_clock::now() < deadline) {
+                mpv_event *event = mpv_wait_event(probe, 0.1);
+                if (event->event_id == MPV_EVENT_END_FILE) {
+                    auto end = static_cast<mpv_event_end_file *>(event->data);
+                    result = end && end->reason == MPV_END_FILE_REASON_EOF ? 0 : -2;
+                    break;
+                }
+                if (event->event_id == MPV_EVENT_SHUTDOWN) break;
+            }
+        }
+    }
+    mpv_terminate_destroy(probe);
+    return result;
+}
+
+- (void)requestSeekThumbnail:(long long)positionMs {
+    if (_stopping.load() || !_thumbnailQueue) return;
+    uint64_t generation = ++_thumbnailGeneration;
+    dispatch_async(_thumbnailQueue, ^{
+        @autoreleasepool {
+            if (self->_stopping.load() || generation != self->_thumbnailGeneration.load()) return;
+            mpv_handle *probe = [self newProbe];
+            if (!probe) return;
+            for (const auto &option : std::vector<std::pair<const char *, const char *>>{
+                {"audio", "no"}, {"sid", "no"}, {"vo", "null"}, {"pause", "yes"}, {"hwdec", "no"},
+                {"hr-seek", "no"}, {"vf", "lavfi=[scale=256:-2]"}, {"screenshot-format", "jpg"},
+                {"screenshot-jpeg-quality", "64"}}) mpv_set_option_string(probe, option.first, option.second);
+            mpv_set_option_string(probe, "start", std::to_string(std::max(0LL, positionMs) / 1000.0).c_str());
+            NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                [NSString stringWithFormat:@"nuvio-thumb-%@.jpg", NSUUID.UUID.UUIDString]];
+            NSData *image = nil;
+            int initialized = mpv_initialize(probe);
+            if (initialized < 0) fprintf(stderr, "Warn: (SeekThumbnail) initialize: %s\n", mpv_error_string(initialized));
+            if (initialized >= 0) {
+                const char *load[] = {"loadfile", self->_probeSource.UTF8String, nullptr};
+                if (mpv_command(probe, load) >= 0) {
+                    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                    while (!self->_stopping.load() && generation == self->_thumbnailGeneration.load() &&
+                           std::chrono::steady_clock::now() < deadline) {
+                        mpv_event *event = mpv_wait_event(probe, 0.05);
+                        if (event->event_id == MPV_EVENT_PLAYBACK_RESTART) {
+                            const char *screenshot[] = {"screenshot-to-file", path.fileSystemRepresentation, "video", nullptr};
+                            int captured = mpv_command(probe, screenshot);
+                            if (captured >= 0) image = [NSData dataWithContentsOfFile:path];
+                            else fprintf(stderr, "Warn: (SeekThumbnail) screenshot: %s\n", mpv_error_string(captured));
+                            break;
+                        }
+                        if (event->event_id == MPV_EVENT_END_FILE || event->event_id == MPV_EVENT_SHUTDOWN) break;
+                    }
+                }
+            }
+            mpv_terminate_destroy(probe);
+            if (!image.length) image = [NSData dataWithContentsOfFile:path];
+            [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+            if (!image.length || self->_stopping.load() || generation != self->_thumbnailGeneration.load()) return;
+            NSString *url = [@"data:image/jpeg;base64," stringByAppendingString:[image base64EncodedStringWithOptions:0]];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self->_stopping.load() || generation != self->_thumbnailGeneration.load()) return;
+                [self runJavaScript:[NSString stringWithFormat:
+                    @"window.nuvioSeekThumbnailReady && window.nuvioSeekThumbnailReady(%lld,%@)", positionMs, javaScriptStringLiteral(url)]];
+            });
+        }
+    });
+}
+
+- (void)checkAutoCrop {
+    _nextCropCheck = CFAbsoluteTimeGetCurrent() + (_autoCropChecks >= 3 ? 15 : 3);
+    char name[] = "screenshot-raw", flag[] = "video";
+    mpv_node values[2] = {};
+    values[0].format = values[1].format = MPV_FORMAT_STRING;
+    values[0].u.string = name; values[1].u.string = flag;
+    mpv_node_list list{2, values, nullptr};
+    mpv_node args{}; args.format = MPV_FORMAT_NODE_ARRAY; args.u.list = &list;
+    mpv_node result{};
+    if (mpv_command_node(_mpv, &args, &result) < 0) return;
+    int64_t w = 0, h = 0, stride = 0;
+    std::string format;
+    const uint8_t *pixels = nullptr;
+    size_t byteSize = 0;
+    if (result.format == MPV_FORMAT_NODE_MAP && result.u.list) {
+        for (int i = 0; i < result.u.list->num; ++i) {
+            std::string key = result.u.list->keys[i];
+            const mpv_node &v = result.u.list->values[i];
+            if (key == "w" && v.format == MPV_FORMAT_INT64) w = v.u.int64;
+            if (key == "h" && v.format == MPV_FORMAT_INT64) h = v.u.int64;
+            if (key == "stride" && v.format == MPV_FORMAT_INT64) stride = v.u.int64;
+            if (key == "format" && v.format == MPV_FORMAT_STRING) format = v.u.string;
+            if (key == "data" && v.format == MPV_FORMAT_BYTE_ARRAY && v.u.ba) {
+                pixels = static_cast<uint8_t *>(v.u.ba->data); byteSize = v.u.ba->size;
+            }
+        }
+    }
+    int bpp = format == "rgba64" ? 8 :
+        (format == "bgra" || format == "bgr0" || format == "rgba" || format == "rgb0") ? 4 : 0;
+    AutoCropBars bars;
+    bool valid = bpp && h > 0 && stride > 0 && (uint64_t)stride * (uint64_t)h <= byteSize &&
+        detectAutoCropBars(pixels, w, h, stride, bpp, bars);
+    mpv_free_node_contents(&result);
+    if (!valid || bars.top > 0.35 || bars.left > 0.35) return; // Ignore fades/mostly-black scenes.
+    const int fw = (int)[self doubleProperty:"video-params/w" fallback:w];
+    const int fh = (int)[self doubleProperty:"video-params/h" fallback:h];
+    if (fw <= 0 || fh <= 0) return;
+    // screenshot-raw may include the existing crop. Convert its measurements back to source space.
+    if (std::abs(w - (int)llround(fw * (1 - 2 * _appliedCrop.left))) <= 2 && w != fw)
+        bars.left = bars.right = _appliedCrop.left + bars.left * (1 - 2 * _appliedCrop.left);
+    if (std::abs(h - (int)llround(fh * (1 - 2 * _appliedCrop.top))) <= 2 && h != fh)
+        bars.top = bars.bottom = _appliedCrop.top + bars.top * (1 - 2 * _appliedCrop.top);
+    if (_autoCropChecks == 0) _cropCandidate = bars;
+    else {
+        _cropCandidate.top = std::min(_cropCandidate.top, bars.top);
+        _cropCandidate.left = std::min(_cropCandidate.left, bars.left);
+    }
+    if (++_autoCropChecks < 3) return;
+    _appliedCrop.top = _appliedCrop.bottom = _cropCandidate.top;
+    _appliedCrop.left = _appliedCrop.right = _cropCandidate.left;
+    int x = (int)llround(fw * _appliedCrop.left), y = (int)llround(fh * _appliedCrop.top);
+    NSString *crop = x || y ? [NSString stringWithFormat:@"%dx%d+%d+%d", fw - 2*x, fh - 2*y, x, y] : @"";
+    mpv_set_property_string(_mpv, "video-crop", crop.UTF8String);
+}
+
+- (void)setMediaTitle:(NSString *)title subtitle:(NSString *)subtitle artwork:(NSString *)artwork {
+    if (_stopping.load() || !title.length) return;
+    nuvioMediaOwner = self;
+    if (!_ownsMediaSession) {
+        _ownsMediaSession = YES;
+        _remoteCommandTargets = [NSMutableArray array];
+        __weak MpvWebPlayer *weakSelf = self;
+        MPRemoteCommandCenter *center = MPRemoteCommandCenter.sharedCommandCenter;
+        NSArray *commands = @[center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
+                              center.stopCommand, center.changePlaybackPositionCommand];
+        for (MPRemoteCommand *command in commands) {
+            command.enabled = YES;
+            id token = [command addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+                MpvWebPlayer *player = weakSelf;
+                if (!player || player->_stopping.load() || nuvioMediaOwner != player) return MPRemoteCommandHandlerStatusNoSuchContent;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (player->_stopping.load()) return;
+                    if (command == center.changePlaybackPositionCommand) {
+                        [player seekToMilliseconds:(long long)(((MPChangePlaybackPositionCommandEvent *)event).positionTime * 1000)];
+                    } else {
+                        NSString *type = command == center.playCommand ? @"mediaPlay" :
+                            command == center.pauseCommand || command == center.stopCommand ? @"mediaPause" :
+                            ([player isPaused] ? @"mediaPlay" : @"mediaPause");
+                        [player sendPlayerEvent:type value:0];
+                    }
+                });
+                return MPRemoteCommandHandlerStatusSuccess;
+            }];
+            [_remoteCommandTargets addObject:@[command, token]];
+        }
+    }
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    info[MPMediaItemPropertyTitle] = title;
+    info[MPMediaItemPropertyArtist] = subtitle ?: @"";
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = info;
+    [self updateNowPlayingPosition:_cachedPositionSeconds.load() duration:_cachedDurationSeconds.load() paused:_cachedPaused.load()];
+    NSUInteger generation = ++_artworkGeneration;
+    NSURL *url = [NSURL URLWithString:artwork ?: @""];
+    if (![@[@"http", @"https"] containsObject:url.scheme.lowercaseString]) return;
+    __weak MpvWebPlayer *weakSelf = self;
+    [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error || !data.length || data.length > 8 * 1024 * 1024) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            MpvWebPlayer *player = weakSelf;
+            if (!player || player->_stopping.load() || nuvioMediaOwner != player || generation != player->_artworkGeneration) return;
+            NSImage *image = [[NSImage alloc] initWithData:data];
+            if (!image) return;
+            NSMutableDictionary *current = [MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo mutableCopy];
+            current[MPMediaItemPropertyArtwork] = [[MPMediaItemArtwork alloc] initWithBoundsSize:image.size requestHandler:^NSImage *(CGSize size) { return image; }];
+            MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = current;
+        });
+    }] resume];
+}
+
+- (void)updateNowPlayingPosition:(double)position duration:(double)duration paused:(BOOL)paused {
+    if (!_ownsMediaSession || _stopping.load() || nuvioMediaOwner != self) return;
+    MPNowPlayingInfoCenter *center = MPNowPlayingInfoCenter.defaultCenter;
+    NSMutableDictionary *info = [center.nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
+    info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(std::max(0.0, position));
+    info[MPMediaItemPropertyPlaybackDuration] = @(std::max(0.0, duration));
+    info[MPNowPlayingInfoPropertyPlaybackRate] = paused ? @0 : @(_cachedSpeed.load());
+    center.nowPlayingInfo = info;
+    center.playbackState = paused ? MPNowPlayingPlaybackStatePaused : MPNowPlayingPlaybackStatePlaying;
+}
+
 @end
 
 static void runOnMainSync(dispatch_block_t block) {
@@ -2820,15 +3117,14 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectAudioTrack(
     return selected ? JNI_TRUE : JNI_FALSE;
 }
 
-// Seek-preview extraction currently uses the Windows libmpv worker path. Keep the JNI surface
-// available on macOS so hovering the timeline degrades to the timestamp-only preview.
 extern "C" JNIEXPORT void JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_requestSeekThumbnail(
-    JNIEnv * /* env */,
-    jobject /* bridge */,
-    jlong /* handle */,
-    jlong /* positionMs */
-) {}
+    JNIEnv *, jobject, jlong handle, jlong positionMs
+) {
+    if (!handle) return;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    [player requestSeekThumbnail:positionMs];
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectSubtitleTrack(
@@ -3007,11 +3303,17 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setSubtitleAssStyl
     runOnMainAsync(^{ [player setSubtitleAssStyleMode:[NSString stringWithUTF8String:text.c_str()] scale:scale]; });
 }
 
-// This shared call updates the Windows SMTC widget; macOS does not provide that integration yet.
 extern "C" JNIEXPORT void JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMediaSessionMetadata(
-    JNIEnv *, jobject, jlong, jstring, jstring, jstring
-) {}
+    JNIEnv *env, jobject, jlong handle, jstring title, jstring subtitle, jstring artwork
+) {
+    if (!handle) return;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    NSString *t = [NSString stringWithUTF8String:jstringToString(env, title).c_str()];
+    NSString *st = [NSString stringWithUTF8String:jstringToString(env, subtitle).c_str()];
+    NSString *art = [NSString stringWithUTF8String:jstringToString(env, artwork).c_str()];
+    runOnMainAsync(^{ [player setMediaTitle:t subtitle:st artwork:art]; });
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setVolume(
@@ -3128,4 +3430,101 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_requestMacosShutdo
     });
     if (status != noErr) fprintf(stderr, "Warning: (Screensaver) macOS shutdown request failed: %d\n", (int)status);
     return status == noErr ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_decodeSpeechSpot(
+    JNIEnv *env, jobject, jlong handle, jdouble start, jdouble duration, jstring output
+) {
+    if (!handle) return -1;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    NSString *path = [NSString stringWithUTF8String:jstringToString(env, output).c_str()];
+    return [player decodeSpeechSpot:start duration:duration output:path];
+}
+
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_speechSourceBytesPerSecond(JNIEnv *, jobject, jlong handle) {
+    if (!handle) return -1;
+    MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    return [player speechSourceBytesPerSecond];
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_pollGamepads(JNIEnv *env, jobject, jint mask, jintArray out) {
+    if (!out || env->GetArrayLength(out) < 64) return 0;
+    std::vector<jint> storage(64);
+    jint *state = storage.data();
+    __block jint connected = 0;
+    runOnMainSync(^{
+        NSArray<GCController *> *connectedControllers = GCController.controllers;
+        static NSMutableArray *slots = nil;
+        if (!slots) slots = [NSMutableArray arrayWithArray:@[NSNull.null,NSNull.null,NSNull.null,NSNull.null,NSNull.null,NSNull.null,NSNull.null,NSNull.null]];
+        for (NSUInteger i = 0; i < 8; ++i) if (slots[i] != NSNull.null && ![connectedControllers containsObject:slots[i]]) slots[i] = NSNull.null;
+        for (GCController *controller in connectedControllers) {
+            if ([slots containsObject:controller]) continue;
+            NSUInteger vacant = [slots indexOfObject:NSNull.null];
+            if (vacant != NSNotFound) slots[vacant] = controller;
+        }
+        NSArray *controllers = slots;
+        for (NSUInteger i = 0; i < MIN((NSUInteger)8, controllers.count); ++i) {
+            if (!(mask & (1 << i))) continue;
+            if (controllers[i] == NSNull.null) continue;
+            GCExtendedGamepad *pad = [(GCController *)controllers[i] extendedGamepad];
+            if (!pad) continue;
+            connected |= 1 << i;
+            jint *slot = state + i * 8;
+            slot[0] = (pad.dpad.up.pressed ? 0x1 : 0) | (pad.dpad.down.pressed ? 0x2 : 0) |
+                (pad.dpad.left.pressed ? 0x4 : 0) | (pad.dpad.right.pressed ? 0x8 : 0) |
+                (pad.buttonMenu.pressed ? 0x10 : 0) | (pad.buttonOptions.pressed ? 0x20 : 0) |
+                (pad.leftThumbstickButton.pressed ? 0x40 : 0) | (pad.rightThumbstickButton.pressed ? 0x80 : 0) |
+                (pad.leftShoulder.pressed ? 0x100 : 0) | (pad.rightShoulder.pressed ? 0x200 : 0) |
+                (pad.buttonA.pressed ? 0x1000 : 0) | (pad.buttonB.pressed ? 0x2000 : 0) |
+                (pad.buttonX.pressed ? 0x4000 : 0) | (pad.buttonY.pressed ? 0x8000 : 0);
+            slot[1] = (int)llround(pad.leftTrigger.value * 255);
+            slot[2] = (int)llround(pad.rightTrigger.value * 255);
+            slot[3] = (int)llround(pad.leftThumbstick.xAxis.value * 32767);
+            slot[4] = (int)llround(pad.leftThumbstick.yAxis.value * 32767);
+            slot[5] = (int)llround(pad.rightThumbstick.xAxis.value * 32767);
+            slot[6] = (int)llround(pad.rightThumbstick.yAxis.value * 32767);
+            slot[7] = (int)(CFAbsoluteTimeGetCurrent() * 60);
+        }
+    });
+    for (int i = 0; i < 8; ++i) if (mask & (1 << i)) env->SetIntArrayRegion(out, i * 8, 8, state + i * 8);
+    return connected;
+}
+
+// Preserve native macOS decorations/insets while making the window compact and floating.
+extern "C" JNIEXPORT void JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setCompactPlayerWindow(
+    JNIEnv *, jobject, jlong viewPointer, jboolean enabled
+) {
+    if (!viewPointer) return;
+    NSView *view = (__bridge NSView *)(void *)(intptr_t)viewPointer;
+    runOnMainAsync(^{
+        NSWindow *window = view.window;
+        if (!window) return;
+        static char stateKey;
+        NSDictionary *prior = objc_getAssociatedObject(window, &stateKey);
+        NSArray<NSButton *> *buttons = @[[window standardWindowButton:NSWindowCloseButton] ?: [NSButton new],
+            [window standardWindowButton:NSWindowMiniaturizeButton] ?: [NSButton new],
+            [window standardWindowButton:NSWindowZoomButton] ?: [NSButton new]];
+        if (enabled == JNI_TRUE && !prior) {
+            prior = @{ @"title": @(window.titleVisibility), @"transparent": @(window.titlebarAppearsTransparent),
+                @"level": @(window.level), @"collection": @(window.collectionBehavior),
+                @"hidden": @[@(buttons[0].hidden), @(buttons[1].hidden), @(buttons[2].hidden)] };
+            objc_setAssociatedObject(window, &stateKey, prior, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            window.titleVisibility = NSWindowTitleHidden;
+            window.titlebarAppearsTransparent = YES;
+            window.level = NSFloatingWindowLevel;
+            window.collectionBehavior |= NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+            for (NSButton *button in buttons) button.hidden = YES;
+        } else if (enabled == JNI_FALSE && prior) {
+            window.titleVisibility = (NSWindowTitleVisibility)[prior[@"title"] integerValue];
+            window.titlebarAppearsTransparent = [prior[@"transparent"] boolValue];
+            window.level = [prior[@"level"] integerValue];
+            window.collectionBehavior = [prior[@"collection"] unsignedIntegerValue];
+            for (NSUInteger i = 0; i < buttons.count; ++i) buttons[i].hidden = [prior[@"hidden"][i] boolValue];
+            objc_setAssociatedObject(window, &stateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    });
 }

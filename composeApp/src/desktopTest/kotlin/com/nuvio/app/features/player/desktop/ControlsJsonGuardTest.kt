@@ -36,9 +36,12 @@ class ControlsJsonGuardTest {
             val payload = state.toControlsJson(122, emptyMap(), "S", host)
             assertTrue(controlsJsonIsWellFormed(payload))
             val fields = Json.parseToJsonElement(payload).jsonObject
+            assertEquals("true", fields.getValue("autoCropSupported").jsonPrimitive.content)
+            assertEquals("true", fields.getValue("seekThumbnailsEnabled").jsonPrimitive.content)
+            val svp = host == DesktopHostOs.WINDOWS || DesktopAnimeSvp.isAvailable
+            assertEquals(svp.toString(), fields.getValue("desktopAnimeSvpEnabled").jsonPrimitive.content)
             val expected = (host == DesktopHostOs.WINDOWS).toString()
-            for (key in listOf("windowsVideoEnhancementsSupported", "autoCropSupported",
-                "desktopAnimeSvpEnabled", "rtxVsrEnabled", "rtxTrueHdrEnabled", "seekThumbnailsEnabled")) {
+            for (key in listOf("windowsVideoEnhancementsSupported", "rtxVsrEnabled", "rtxTrueHdrEnabled")) {
                 assertEquals(expected, fields.getValue(key).jsonPrimitive.content, "$host: $key")
             }
         }
