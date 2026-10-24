@@ -22,7 +22,7 @@ node_modules/
 **/__pycache__/
 logs/
 analysis/
-Docs
+#Docs
 keystore/
 scripts/build-distribution.sh
 asset
