@@ -2510,6 +2510,10 @@ button svg * {
   flex: 0 0 auto;
 }
 
+#videoInfoButton[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--theme-control-foreground);
+}
+
 .action span {
   min-width: 0;
   overflow: hidden;

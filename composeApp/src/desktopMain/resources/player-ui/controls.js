@@ -1055,7 +1055,8 @@ const setProgress = (positionMs, durationMs) => {
   seek.value = Math.round(percent * 10);
   seek.style.setProperty("--progress", `${percent}%`);
   // Buffered (demuxer-cached ahead) end, never drawn behind the played fill.
-  const bufferedMs = Math.max(0, Number(state.bufferedMs) || 0);
+  const bufferedEndMs = Math.max(0, Number(state.bufferedMs) || 0);
+  const bufferedMs = liveWindow ? Math.max(0, bufferedEndMs - liveWindow.start) : bufferedEndMs;
   const bufferedPercent = durationMs > 0
     ? Math.max(percent, Math.min(100, bufferedMs / durationMs * 100))
     : 0;
@@ -5370,6 +5371,11 @@ const renderChrome = () => {
   applyUltraHudLayout(ultraHud);
   root.classList.toggle("clock-always-visible", Boolean(state.alwaysShowClock));
   root.classList.toggle("mpv-diagnostics", Boolean(mpvDiagnosticsEnabled));
+  const videoInfoButton = document.getElementById("videoInfoButton");
+  if (videoInfoButton) {
+    videoInfoButton.setAttribute("aria-pressed", String(mpvDiagnosticsEnabled));
+    videoInfoButton.classList.toggle("selected", mpvDiagnosticsEnabled);
+  }
   const posterHighlightMode = ["white", "accent", "shine"].includes(
     String(state.posterHighlightMode || "").toLowerCase(),
   )
@@ -6121,6 +6127,7 @@ const actionOverflowDismissCommands = new Set([
   "episodes",
   "submitIntro",
   "pictureInPicture",
+  "toggleMpvDiagnostics",
 ]);
 let actionOverflowSyncHandle = 0;
 let appliedActionOverflowSignature = "";
@@ -6407,6 +6414,10 @@ document.querySelectorAll("[data-command]").forEach(button => {
     event.stopPropagation();
     noteChromeActivity(true);
     const command = button.dataset.command;
+    if (command === "toggleMpvDiagnostics") {
+      window.nuvioToggleMpvDiagnostics();
+      return;
+    }
     if (command === "audio") {
       openPlayerModal("audio");
       return;

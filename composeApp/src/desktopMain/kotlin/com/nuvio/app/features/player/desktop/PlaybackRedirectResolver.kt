@@ -5,7 +5,11 @@ import com.nuvio.app.core.perf.PerfTelemetry
 import com.nuvio.app.core.storage.DesktopStorage
 import com.nuvio.app.features.player.isPlaybackPlaceholderUrl
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -37,6 +41,8 @@ internal data class PlaybackRedirectResolution(
     val playbackUrl: String,
     val hops: Int,
     val outcome: Outcome,
+    val retryable: Boolean = false,
+    val httpErrorStatus: Int? = null,
 ) {
     enum class Outcome {
         /** Not an http(s) URL, or a host known to serve media directly — nothing to resolve. */
@@ -58,8 +64,10 @@ internal data class PlaybackRedirectResolution(
     val pinned: Boolean get() = playbackUrl != sourceUrl
 
     companion object {
-        fun unchanged(sourceUrl: String, outcome: Outcome, hops: Int = 0) =
-            PlaybackRedirectResolution(sourceUrl, sourceUrl, hops, outcome)
+        fun unchanged(
+            sourceUrl: String, outcome: Outcome, hops: Int = 0,
+            retryable: Boolean = false, httpErrorStatus: Int? = null,
+        ) = PlaybackRedirectResolution(sourceUrl, sourceUrl, hops, outcome, retryable, httpErrorStatus)
     }
 }
 
@@ -87,10 +95,38 @@ internal object PlaybackRedirectResolver {
     /**
      * The whole probe sits in series with playback start, so it gets a tight budget: a resolver
      * that is stalling (Debridio waiting on a throttled TorBox call cost 14 s once) should cost
-     * a few seconds at most, and only once — see [endpointVerdicts].
+     * a few seconds at most, and only once — see [endpointVerdicts]. AIOStreams playback
+     * endpoints also prepare cold Usenet files: their redirect needs a larger bounded budget,
+     * otherwise mpv opens the unresolved URL and repeats that preparation on every range seek.
      */
     private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(3)
     private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(4)
+    private val DYNAMIC_PLAYBACK_TIMEOUT: Duration = Duration.ofSeconds(20)
+
+    /** Cold-file preparation retries never hand an unresolved dynamic URL to the player. */
+    suspend fun resolveForPlayback(
+        sourceUrl: String,
+        sourceHeaders: Map<String, String>,
+        forceProbe: Boolean = false,
+    ): PlaybackRedirectResolution {
+        val dynamic = isDynamicPlaybackResolver(sourceUrl.trim())
+        repeat(if (dynamic) 3 else 1) { attempt ->
+            val resolution = resolve(sourceUrl, sourceHeaders, forceProbe = forceProbe || attempt > 0)
+            if (!dynamic || !resolution.retryable || attempt == 2) return resolution
+            log.i { "waiting for direct playback link host=${hostOf(sourceUrl)} attempt=${attempt + 1}/3" }
+            delay((attempt + 1) * 1_000L)
+        }
+        error("Unreachable playback resolution state")
+    }
+
+    /** AIOStreams resolver URLs must never become FFmpeg's range-request endpoint. */
+    internal fun canOpenPlaybackUrl(sourceUrl: String, playbackUrl: String): Boolean =
+        !isDynamicPlaybackResolver(sourceUrl.trim()) ||
+            (playbackUrl != sourceUrl.trim() &&
+                (playbackUrl.startsWith("https://", ignoreCase = true) ||
+                    playbackUrl.startsWith("http://", ignoreCase = true)) &&
+                !isDynamicPlaybackResolver(playbackUrl) &&
+                !isPlaybackPlaceholderUrl(playbackUrl))
 
     /** How long a failed probe keeps its endpoint off the probe list. */
     private const val FAILED_VERDICT_TTL_MS = 5L * 60L * 1000L
@@ -175,7 +211,8 @@ internal object PlaybackRedirectResolver {
             )
         }
         val endpoint = endpointKey(normalized)
-        rememberedVerdict(endpoint)?.takeUnless { forceProbe }?.let { verdict ->
+        val dynamic = isDynamicPlaybackResolver(normalized)
+        rememberedVerdict(endpoint)?.takeUnless { forceProbe || dynamic }?.let { verdict ->
             val expired = verdict.outcome == PlaybackRedirectResolution.Outcome.Failed &&
                 System.currentTimeMillis() - verdict.atMs > FAILED_VERDICT_TTL_MS
             if (expired) {
@@ -188,10 +225,22 @@ internal object PlaybackRedirectResolver {
             }
         }
 
-        val resolution = probeChain(normalized, sourceHeaders)
+        val resolution = if (dynamic) {
+            withTimeoutOrNull(DYNAMIC_PLAYBACK_TIMEOUT.toMillis()) {
+                runInterruptible { probeChain(normalized, sourceHeaders) }
+            } ?: PlaybackRedirectResolution.unchanged(
+                normalized, PlaybackRedirectResolution.Outcome.Failed, retryable = true,
+            )
+        } else {
+            runInterruptible { probeChain(normalized, sourceHeaders) }
+        }
         // Pinned and Placeholder are verdicts on the link (the next one from the same resolver
         // may pin fine); the rest describe the endpoint itself and end the probing.
-        if (resolution.outcome in REMEMBERED_OUTCOMES) rememberVerdict(endpoint, resolution.outcome)
+        // A slow cold-file preparation is specific to that play, not evidence that every link
+        // from the resolver should bypass pinning for the next five minutes.
+        if (!dynamic && resolution.outcome in REMEMBERED_OUTCOMES) {
+            rememberVerdict(endpoint, resolution.outcome)
+        }
         resolution
     }
 
@@ -204,11 +253,13 @@ internal object PlaybackRedirectResolver {
         var everyRedirectCacheable = true
         while (true) {
             val response = runCatching { probe(current, sourceHeaders) }.getOrElse { error ->
+                if (error is InterruptedException) throw error
                 log.w { "probe failed hop=$hops host=${hostOf(current)}: ${error.message}" }
                 return PlaybackRedirectResolution.unchanged(
                     normalized,
                     PlaybackRedirectResolution.Outcome.Failed,
                     hops,
+                    retryable = error is IOException,
                 )
             }
             val location = response.location
@@ -224,6 +275,8 @@ internal object PlaybackRedirectResolver {
                         normalized,
                         PlaybackRedirectResolution.Outcome.Failed,
                         hops,
+                        retryable = response.statusCode in setOf(408, 500, 502, 503, 504),
+                        httpErrorStatus = response.statusCode,
                     )
                 }
                 break
@@ -241,8 +294,12 @@ internal object PlaybackRedirectResolver {
             current = next
             // A cross-host hop is the CDN (or another resolver); don't touch it — that open is
             // mpv's to make. Same-host bounces are the resolver rearranging its own endpoints.
-            if (!hostOf(next).equals(hostOf(response.requestUrl), ignoreCase = true)) break
-            if (hops >= MAX_SAME_HOST_HOPS) break
+            if (!hostOf(next).equals(hostOf(response.requestUrl), ignoreCase = true) &&
+                !isDynamicPlaybackResolver(next)
+            ) break
+            if (hops >= MAX_SAME_HOST_HOPS) {
+                return PlaybackRedirectResolution.unchanged(normalized, PlaybackRedirectResolution.Outcome.Failed, hops)
+            }
         }
 
         val outcome = when {
@@ -251,6 +308,7 @@ internal object PlaybackRedirectResolver {
             // own `/static/<status>.mp4` (429.mp4 for a rate limit). It must not be pinned: the
             // source URL is what a retry re-resolves, and the next resolve may well succeed.
             isPlaybackPlaceholderUrl(current) -> PlaybackRedirectResolution.Outcome.Placeholder
+            isDynamicPlaybackResolver(normalized) -> PlaybackRedirectResolution.Outcome.Pinned
             everyRedirectCacheable -> PlaybackRedirectResolution.Outcome.CacheableRedirect
             else -> PlaybackRedirectResolution.Outcome.Pinned
         }
@@ -281,7 +339,7 @@ internal object PlaybackRedirectResolver {
     private fun probe(url: String, sourceHeaders: Map<String, String>): ProbeResponse {
         val builder = HttpRequest.newBuilder()
             .uri(URI(url))
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(if (isDynamicPlaybackResolver(url)) DYNAMIC_PLAYBACK_TIMEOUT else REQUEST_TIMEOUT)
             .header("Range", "bytes=0-0")
             .GET()
         var hasUserAgent = false
@@ -347,6 +405,12 @@ internal object PlaybackRedirectResolver {
 
     internal fun hostOf(url: String): String =
         runCatching { URI(url).host.orEmpty() }.getOrDefault("")
+
+    private fun isDynamicPlaybackResolver(url: String): Boolean {
+        val path = runCatching { URI(url).path }.getOrNull().orEmpty()
+        return path.startsWith("/api/v1/debrid/playback/") ||
+            path.startsWith("/api/v1/usenet/")
+    }
 
     private fun isRestrictedJdkHeader(name: String): Boolean =
         name.equals("Connection", ignoreCase = true) ||

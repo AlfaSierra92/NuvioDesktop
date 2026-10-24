@@ -2,6 +2,7 @@
 #import <Carbon/Carbon.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <IOKit/IOKitLib.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
 #define GL_SILENCE_DEPRECATION
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
@@ -16,6 +17,7 @@
 #include <atomic>
 #include <cmath>
 #include <dlfcn.h>
+#include <mutex>
 #include <string>
 #include <vector>
 #include "hdr_output.h"
@@ -1637,9 +1639,10 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 }
                 [self applyHdrForPolledGamma:gamma primaries:primaries reason:@"sync" force:NO];
                 NSString *script = [NSString stringWithFormat:
-                    @"window.playerUpdate({duration:%0.3f,position:%0.3f,paused:%@,loading:%@,audioTracks:%@,subtitleTracks:%@})",
+                    @"window.playerUpdate({duration:%0.3f,position:%0.3f,buffered:%0.3f,paused:%@,loading:%@,audioTracks:%@,subtitleTracks:%@})",
                     duration,
                     position,
+                    (double)[self bufferedPositionMs] / 1000.0,
                     paused ? @"true" : @"false",
                     loading ? @"true" : @"false",
                     audioTracks,
@@ -3052,6 +3055,32 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isMuted(
     return value ? JNI_TRUE : JNI_FALSE;
 }
 
+// Process-scoped power assertions work in windowed, fullscreen and PiP playback without
+// synthesizing input or changing the idle clock used by Nuvio's own screensaver.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMacosDisplaySleepInhibited(
+    JNIEnv *, jobject, jboolean inhibited
+) {
+    static std::mutex assertionMutex;
+    static IOPMAssertionID displayAssertion = kIOPMNullAssertionID;
+    std::lock_guard<std::mutex> lock(assertionMutex);
+    if (inhibited == JNI_TRUE) {
+        if (displayAssertion != kIOPMNullAssertionID) return JNI_TRUE;
+        // Preventing display idle sleep also prevents system idle sleep (IOPMLib contract).
+        IOPMAssertionID assertion = kIOPMNullAssertionID;
+        IOReturn result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
+            CFSTR("Nuvio video playback display"), &assertion);
+        if (result != kIOReturnSuccess) return JNI_FALSE;
+        displayAssertion = assertion;
+        return JNI_TRUE;
+    }
+    if (displayAssertion == kIOPMNullAssertionID) return JNI_TRUE;
+    if (IOPMAssertionRelease(displayAssertion) != kIOReturnSuccess) return JNI_FALSE;
+    displayAssertion = kIOPMNullAssertionID;
+    return JNI_TRUE;
+}
+
 // The hardware idle clock also sees input consumed by WebKit and native video surfaces.
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_systemIdleMs(JNIEnv *, jobject) {
@@ -3063,9 +3092,15 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_systemIdleMs(JNIEn
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isForegroundProcess(JNIEnv *, jobject) {
-    __block BOOL active = NO;
-    runOnMainSync(^{ active = NSApp.isActive; });
-    return active ? JNI_TRUE : JNI_FALSE;
+    // The screensaver calls this on AWT's event thread. AppKit accessibility can be waiting
+    // for that same thread, so synchronously asking NSApp on the main queue deadlocks both.
+    // Process Manager reads foreground identity without crossing either UI event queue.
+    ProcessSerialNumber foreground = {0, 0};
+    ProcessSerialNumber current = {0, 0};
+    Boolean same = false;
+    if (GetFrontProcess(&foreground) != noErr || GetCurrentProcess(&current) != noErr ||
+        SameProcess(&foreground, &current, &same) != noErr) return JNI_FALSE;
+    return same ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

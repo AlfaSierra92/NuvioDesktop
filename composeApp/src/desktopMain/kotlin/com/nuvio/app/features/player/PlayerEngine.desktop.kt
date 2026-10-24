@@ -62,6 +62,7 @@ import kotlinx.coroutines.flow.drop
 import java.awt.KeyEventDispatcher
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.player_error_debrid_rate_limited
+import nuvio.composeapp.generated.resources.player_error_direct_link_unavailable
 import nuvio.composeapp.generated.resources.player_rate_limit_reconnecting
 import nuvio.composeapp.generated.resources.player_rate_limit_switching_server
 import org.jetbrains.compose.resources.getString
@@ -511,8 +512,10 @@ private fun NativePlayerSurface(
         // every seek (see PlaybackRedirectResolver). The source URL stays the stream's identity;
         // only what mpv opens changes.
         var resolution = redirectResolutions[sourceUrl]
-            ?: PlaybackRedirectResolver.resolve(sourceUrl, playbackHeaders)
+            ?.takeIf { PlaybackRedirectResolver.canOpenPlaybackUrl(sourceUrl, it.playbackUrl) }
+            ?: PlaybackRedirectResolver.resolveForPlayback(sourceUrl, playbackHeaders)
                 .also { redirectResolutions[sourceUrl] = it }
+        val directLinkErrorMessage = getString(Res.string.player_error_direct_link_unavailable)
         // A TorBox node that rate-limited us earlier this session keeps refusing our IP for over
         // an hour, and addons hand back their cached link on that same node. Start on another
         // node instead of opening straight into the ban.
@@ -552,7 +555,16 @@ private fun NativePlayerSurface(
             progressFraction: Float,
             tracePlaybackStart: Boolean,
             onError: (String?) -> Unit,
-        ) {
+        ): Boolean {
+            // Includes recovery attaches: never fall back to the dynamic resolver URL when
+            // preparation fails, even after the bounded automatic retries have been spent.
+            if (!PlaybackRedirectResolver.canOpenPlaybackUrl(sourceUrl, playbackUrl)) {
+                // Preserve provider-wide throttling classification so common recovery does not
+                // make another diagnostic request to a provider that has just refused us.
+                val status = redirectResolutions[sourceUrl]?.httpErrorStatus
+                onError(if (status != null) "$directLinkErrorMessage (HTTP error $status)" else directLinkErrorMessage)
+                return false
+            }
             controller.attach(
                 tracePlaybackStart = tracePlaybackStart,
                 sourceUrl = playbackUrl,
@@ -594,6 +606,7 @@ private fun NativePlayerSurface(
                 restoreVolume = true,
                 onError = onError,
             )
+            return true
         }
         // A pinned CDN link can outlive its token where the resolver's own hop would have been
         // re-resolved by FFmpeg for free. On the first 401/403/404/410 from a pinned attach,
@@ -649,7 +662,7 @@ private fun NativePlayerSurface(
                 pinnedLinkRefreshUsed = true
                 val retryErrorHandler = this
                 surfaceScope.launch {
-                    val fresh = PlaybackRedirectResolver.resolve(sourceUrl, playbackHeaders)
+                    val fresh = PlaybackRedirectResolver.resolveForPlayback(sourceUrl, playbackHeaders)
                     if (attachedAttemptId.value != playbackAttemptId) return@launch
                     if (!fresh.pinned || fresh.playbackUrl == current.playbackUrl) {
                         latestOnError.value(message)
@@ -877,7 +890,7 @@ private fun NativePlayerSurface(
                     // that re-runs its failover chain, which is exactly the retry it is built for.
                     val reopen = redirectResolutions[sourceUrl]
                         ?.takeIf(SeekRateLimitRecovery::canReopenWithoutProbe)
-                        ?: PlaybackRedirectResolver.resolve(sourceUrl, playbackHeaders, forceProbe = true)
+                        ?: PlaybackRedirectResolver.resolveForPlayback(sourceUrl, playbackHeaders, forceProbe = true)
                     if (attachedAttemptId.value != playbackAttemptId) return@launch
                     if (!SeekRateLimitRecovery.isReopenable(reopen)) {
                         BingeAdvanceLog.i {
@@ -901,13 +914,13 @@ private fun NativePlayerSurface(
             }
         }
         controller.rateLimitFailoverFallback = onSurfaceError::reconnectAsFailoverFallback
-        attachWith(
+        if (!attachWith(
             playbackUrl = resolution.playbackUrl,
             positionMs = initialPositionMs,
             progressFraction = initialProgressFraction ?: 0f,
             tracePlaybackStart = true,
             onError = onSurfaceError,
-        )
+        )) return@LaunchedEffect
         attachedAttemptId.value = playbackAttemptId
         onPlayerAttached()
     }

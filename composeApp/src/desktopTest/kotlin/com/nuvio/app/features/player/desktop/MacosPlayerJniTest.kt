@@ -8,6 +8,17 @@ import kotlin.test.assertTrue
 
 class MacosPlayerJniTest {
     @Test
+    fun `macOS playback keep-awake can be acquired and released repeatedly`() {
+        if (DesktopHostOs.current != DesktopHostOs.MACOS) return
+        try {
+            repeat(2) { assertTrue(NativePlayerBridge.setMacosDisplaySleepInhibited(true)) }
+        } finally {
+            assertTrue(NativePlayerBridge.setMacosDisplaySleepInhibited(false))
+        }
+        assertTrue(NativePlayerBridge.setMacosDisplaySleepInhibited(false))
+    }
+
+    @Test
     fun `shared player methods resolve against the real macOS JNI library`() {
         if (DesktopHostOs.current != DesktopHostOs.MACOS) return
         // Calling with a disposed handle must be safe, but still makes the JVM resolve each
@@ -39,6 +50,7 @@ class MacosPlayerJniTest {
                 tested += method.name
             }
         assertTrue("systemIdleMs" in tested)
+        assertTrue("setMacosDisplaySleepInhibited" in tested)
         assertTrue("isForegroundProcess" in tested)
         assertTrue("requestMacosShutdown" in tested)
         assertFalse(NativePlayerBridge.requestMacosShutdown(confirmed = false))

@@ -181,6 +181,9 @@ internal object NativePlayerBridge {
      */
     external fun setWindowsDisplaySleepInhibited(inhibited: Boolean): Boolean
 
+    /** macOS power assertions, released on pause and when the player is disposed. */
+    external fun setMacosDisplaySleepInhibited(inhibited: Boolean): Boolean
+
     /**
      * Whether the foreground window belongs to this process. AWT's `Window.isActive` cannot be
      * trusted for this while focus sits in the WebView2 HUD (a non-AWT child of the frame).
