@@ -1,5 +1,6 @@
 package com.nuvio.app.core.ui
 
+import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
@@ -18,6 +19,7 @@ import coil3.decode.ImageSource
 import coil3.fetch.SourceFetchResult
 import coil3.request.ImageRequest
 import coil3.request.Options
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -37,7 +39,6 @@ import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Image as SkiaImage
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.CRC32
 import kotlin.math.roundToInt
 
@@ -736,21 +737,41 @@ private fun Bitmap.resampleTo(width: Int, height: Int): Bitmap {
     }
 }
 
-private object AnimatedImageClock {
+/** One timer for mounted animated painters; no wakeups once the last one leaves composition. */
+internal class AnimatedImageClock(
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
     val tick = mutableStateOf(0)
-    private val started = AtomicBoolean(false)
+    private var subscribers = 0
+    private var ticker: Job? = null
 
-    fun ensureStarted() {
-        if (started.compareAndSet(false, true)) {
-            CoroutineScope(Dispatchers.Default).launch {
-                while (true) {
-                    delay(33)
-                    tick.value = (tick.value + 1) and 0xFFFF
-                }
+    internal val isRunning: Boolean
+        @Synchronized get() = ticker?.isActive == true
+
+    @Synchronized
+    fun acquire() {
+        subscribers++
+        if (subscribers != 1) return
+        ticker = scope.launch {
+            while (true) {
+                delay(33)
+                tick.value = (tick.value + 1) and 0xFFFF
             }
         }
     }
+
+    @Synchronized
+    fun release() {
+        check(subscribers > 0)
+        subscribers--
+        if (subscribers == 0) {
+            ticker?.cancel()
+            ticker = null
+        }
+    }
 }
+
+private val sharedAnimatedImageClock = AnimatedImageClock()
 
 internal class SkiaAnimatedImage(
     override val width: Int,
@@ -819,12 +840,24 @@ internal class SkiaAnimatedImage(
 
 internal class SkiaAnimatedPainter(
     private val image: SkiaAnimatedImage,
-) : Painter() {
-    init {
-        if (image.isAnimated) {
-            AnimatedImageClock.ensureStarted()
-        }
+    private val clock: AnimatedImageClock = sharedAnimatedImageClock,
+) : Painter(), RememberObserver {
+    private var remembered = false
+
+    // Coil forwards these callbacks to its transformed painter, including retained artwork.
+    override fun onRemembered() {
+        if (remembered || !image.isAnimated) return
+        remembered = true
+        clock.acquire()
     }
+
+    override fun onForgotten() {
+        if (!remembered) return
+        remembered = false
+        clock.release()
+    }
+
+    override fun onAbandoned() = onForgotten()
 
     override val intrinsicSize: Size = Size(image.width.toFloat(), image.height.toFloat())
 
@@ -844,7 +877,7 @@ internal class SkiaAnimatedPainter(
 
     override fun DrawScope.onDraw() {
         if (image.isAnimated) {
-            AnimatedImageClock.tick.value
+            clock.tick.value
         }
         val frame = image.skiaFrameAt(System.currentTimeMillis() - startedAtMs)
         drawIntoCanvas { canvas ->

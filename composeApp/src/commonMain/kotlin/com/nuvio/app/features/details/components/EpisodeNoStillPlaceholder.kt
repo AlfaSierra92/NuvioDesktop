@@ -1,11 +1,5 @@
 package com.nuvio.app.features.details.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +9,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,7 +28,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.floor
+import kotlinx.coroutines.delay
 
 /**
  * An unaired episode with no still yet (common on a new season): a little alarm clock whose
@@ -47,12 +45,14 @@ internal fun EpisodeNoStillPlaceholder(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val outline = Color(0xFF52525B)
-    val ticks by rememberInfiniteTransition(label = "noStillClock").animateFloat(
-        initialValue = 0f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(tween(6_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "noStillHand",
-    )
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        // The hand only has twelve positions: avoid requesting a display frame between ticks.
+        while (true) {
+            delay(500)
+            tick = (tick + 1) % 12
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -81,7 +81,7 @@ internal fun EpisodeNoStillPlaceholder(
             drawCircle(outline, radius = 14f * u, center = centre, style = Stroke(stroke))
             drawCircle(outline, radius = 1.6f * u, center = p(24f, 10.5f))
             // Minute hand, stepping a twelfth of a turn at a time
-            rotate(degrees = floor(ticks) * 30f, pivot = centre) {
+            rotate(degrees = tick * 30f, pivot = centre) {
                 drawLine(accent, centre, p(24f, 18.5f), stroke, StrokeCap.Round)
             }
             drawLine(accent, centre, p(29f, 29f), stroke, StrokeCap.Round)
