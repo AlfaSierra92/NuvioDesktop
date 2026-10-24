@@ -89,26 +89,16 @@ internal object DesktopStorage {
         val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
         val userHome = Paths.get(System.getProperty("user.home").orEmpty())
         if (!osName.contains("win")) {
-            val parent = if (osName.contains("mac")) {
-                userHome.resolve("Library/Application Support")
-            } else {
-                System.getenv("XDG_CONFIG_HOME")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(Paths::get)
-                    ?: userHome.resolve(".config")
-            }
-            val destination = parent.resolve(if (osName.contains("mac")) "NuvioHTPC" else "nuviohtpc")
+            val destination = appDataInstallDir()
+            val parent = destination.parent
             val legacy = parent.resolve(if (osName.contains("mac")) "Nuvio" else "nuvio")
             freshInstall = !destination.exists() && !legacy.exists()
             migrateLegacyDirectories(destination, legacy)
             return destination
         }
 
-        val localAppData = System.getenv("LOCALAPPDATA")
-            ?.takeIf { it.isNotBlank() }
-            ?.let(Paths::get)
-            ?: userHome.resolve("AppData/Local")
-        val destination = localAppData.resolve("NuvioHTPC")
+        val destination = appDataInstallDir()
+        val localAppData = destination.parent
         if (destination.exists()) return destination
 
         // Nuvio Desktop stored preferences in roaming AppData while its logs, custom badges,
@@ -130,8 +120,10 @@ internal object DesktopStorage {
     }
 
     /**
-     * Portable mode (Settings > Account > Updates): a `portable` marker next to Nuvio.exe keeps all
-     * data in a `data` folder beside it instead of %LOCALAPPDATA%\NuvioHTPC. Safe across updates:
+     * Portable mode: a `portable` marker in [portableInstallRoot] keeps all data in its `data`
+     * folder instead of the OS application-data directory. On macOS the root is a dedicated
+     * <app-name>.portable directory beside the .app, never inside its signed bundle.
+     * Safe across Windows updates:
      * the updater only deletes files the previous release's manifest listed, never `data\`.
      *
      * Both directions move the data at startup, after the relaunch helper has waited out the old
@@ -336,16 +328,15 @@ internal object DesktopStorage {
         }
     }
 
-    private fun appDataInstallDir(): Path {
-        val localAppData = System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)?.let(Paths::get)
-            ?: Paths.get(System.getProperty("user.home").orEmpty(), "AppData", "Local")
-        return localAppData.resolve("NuvioHTPC")
-    }
+    private fun appDataInstallDir(): Path = desktopInstalledDataDirectory(
+        osName = System.getProperty("os.name").orEmpty(),
+        userHome = Paths.get(System.getProperty("user.home").orEmpty()),
+    )
 
-    /** The folder holding Nuvio.exe; null in a dev run, which has no install to be portable in. */
+    /** Outside the .app on Mac, beside the executable elsewhere; null on a development run. */
     fun portableInstallRoot(): Path? {
         val appPath = System.getProperty("jpackage.app-path")?.takeIf(String::isNotBlank) ?: return null
-        return Paths.get(appPath).parent
+        return desktopPortableInstallRoot(Paths.get(appPath), System.getProperty("os.name").orEmpty())
     }
 
     /** Whether this session's data lives beside the exe (see [resolvePortableDataDir]). */
@@ -360,14 +351,15 @@ internal object DesktopStorage {
         val installRoot = portableInstallRoot() ?: return false
         return runCatching {
             if (enabled) {
+                Files.createDirectories(installRoot)
                 Files.writeString(
                     installRoot.resolve(PORTABLE_MARKER_NAMES.first()),
                     "Nuvio HTPC keeps its data in the data folder beside this file. " +
                         "Turn portable mode off in Settings > Account rather than deleting this.\r\n",
                 )
             } else {
-                PORTABLE_MARKER_NAMES.forEach { Files.deleteIfExists(installRoot.resolve(it)) }
                 if (isPortable) Files.writeString(rootDir.resolve(PORTABLE_RETURN_FLAG), "")
+                PORTABLE_MARKER_NAMES.forEach { Files.deleteIfExists(installRoot.resolve(it)) }
             }
             true
         }.getOrElse { error ->

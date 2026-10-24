@@ -2,6 +2,24 @@
 
 Audit del 24 ottobre 2026 sul working tree corrente, incluse le modifiche locali già presenti.
 
+## Aggiornamento: priorità alte corrette
+
+I punti 1 e 2 sono stati corretti nel sorgente. Su macOS il riavvio usa un helper shell
+che attende il processo precedente e i figli prima di riaprire la .app tramite Launch Services;
+un errore di avvio dell’helper restituisce false senza un’eccezione non gestita.
+La modalità portable usa `<nome-app>.portable/data` accanto alla .app, fuori dal bundle,
+e torna a `~/Library/Application Support/NuvioHTPC` quando viene disattivata.
+La richiesta di ritorno viene scritta prima di rimuovere i marker portable.
+Sono stati aggiornati i testi delle impostazioni e il README.
+
+Verifica: compilazione desktop e 34 test passati su macOS (18 su riavvio, percorsi,
+migrazione portable e account; 16 su storage e backup). Il test dell’helper esegue
+processi temporanei reali e verifica l’attesa e i percorsi con caratteri speciali.
+La migrazione di andata/ritorno verifica impostazioni, account, cache e bundle invariato.
+Non sono stati effettuati cambi account o migrazioni sui dati personali dell’app installata,
+né una prova interattiva del riavvio tramite Launch Services.
+Le sezioni seguenti conservano la situazione rilevata prima delle correzioni.
+
 ## Ambito e limiti
 
 Richiesta interpretata come inventario delle funzionalità ereditate da Windows da completare o correggere su macOS. Ricerca trasversale nei sorgenti e lettura mirata dei rami di piattaforma, dei chiamanti, delle impostazioni, dei bridge JNI, dei controlli HTML/JS e della configurazione di build. Inventario Kotlin: 840 file commonMain, 9 fullCommonMain, 305 desktopMain, 307 commonTest, 150 desktopTest. Le dipendenze vendorizzate non sono state sottoposte a una revisione riga per riga.

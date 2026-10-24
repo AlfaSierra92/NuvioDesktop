@@ -45,6 +45,15 @@ and the bundled Windows Nuvio Engine/SVP runtime, are not supplied by this port.
 Network streams, large home catalogs, and all playback options have not been
 exhaustively tested. See [Build on macOS](#build-on-macos) for setup and validation.
 
+On macOS, normal settings live in `~/Library/Application Support/NuvioHTPC`.
+Portable mode keeps them in `Nuvio HTPC.portable/data` beside `Nuvio HTPC.app`,
+outside the application bundle. Enable it in Settings > Account from a writable
+location. When moving a portable installation, move the `.app` and its matching
+`.portable` folder together. Disabling portable mode copies the settings back to
+Application Support and retains the previous portable data as
+`Nuvio HTPC.portable/data.old`. Changing mode, switching accounts and importing
+settings restart the packaged app after its current process has closed.
+
 # Home Theatre features
 
 * Mouse, keyboard or controller friendly TV Mode with full-screen navigation, adaptive hero, row-jump navigation, cast and award information. This applies across all panels, not just home.
