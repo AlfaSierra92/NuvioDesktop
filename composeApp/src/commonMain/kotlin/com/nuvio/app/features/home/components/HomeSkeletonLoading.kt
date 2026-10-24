@@ -24,10 +24,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.Dp
@@ -38,14 +41,11 @@ import com.nuvio.app.core.ui.landscapePosterWidth
 import com.nuvio.app.core.ui.rememberHomePosterCardStyleUiState
 
 @Composable
-private fun rememberHomeSkeletonBrush(): Brush {
-    val shimmerColors = listOf(
-        MaterialTheme.colorScheme.surface,
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-        MaterialTheme.colorScheme.surface,
-    )
+private fun rememberHomeSkeletonBrush(): State<Brush> {
+    val surface = MaterialTheme.colorScheme.surface
+    val shimmerColors = remember(surface) { listOf(surface, surface.copy(alpha = 0.5f), surface) }
     val transition = rememberInfiniteTransition()
-    val translateAnim by transition.animateFloat(
+    val translateAnim = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1000f,
         animationSpec = infiniteRepeatable(
@@ -53,12 +53,22 @@ private fun rememberHomeSkeletonBrush(): Brush {
             repeatMode = RepeatMode.Restart,
         ),
     )
-    val brush = Brush.linearGradient(
-        colors = shimmerColors,
-        start = Offset(translateAnim - 200f, 0f),
-        end = Offset(translateAnim, 0f),
-    )
-    return brush
+    // Share one brush per animation tick, but read it only from draw callbacks. Reading the
+    // animated offset in composition would recompose the whole hero/row on every frame.
+    return remember(shimmerColors, translateAnim) {
+        derivedStateOf {
+            val offset = translateAnim.value
+            Brush.linearGradient(
+                colors = shimmerColors,
+                start = Offset(offset - 200f, 0f),
+                end = Offset(offset, 0f),
+            )
+        }
+    }
+}
+
+private fun Modifier.skeletonBackground(brush: State<Brush>): Modifier = drawBehind {
+    drawRect(brush.value)
 }
 
 @Composable
@@ -90,7 +100,7 @@ fun HomeSkeletonHero(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(layout.heroHeight)
-                .background(brush),
+                .skeletonBackground(brush),
         ) {
             Box(
                 modifier = Modifier
@@ -214,7 +224,7 @@ fun HomeSkeletonRow(
                 .width(140.dp)
                 .height(18.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(brush),
+                .skeletonBackground(brush),
         )
         if (showHeaderAccent) {
             // Accent bar
@@ -223,7 +233,7 @@ fun HomeSkeletonRow(
                     .width(60.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(brush),
+                    .skeletonBackground(brush),
             )
             Spacer(modifier = Modifier.height(2.dp))
         }
@@ -237,7 +247,7 @@ fun HomeSkeletonRow(
                         .width(skeletonWidth)
                         .height(skeletonHeight)
                         .clip(RoundedCornerShape(posterCardStyle.cornerRadiusDp.dp))
-                        .background(brush),
+                        .skeletonBackground(brush),
                 )
             }
         }
@@ -246,7 +256,7 @@ fun HomeSkeletonRow(
 
 @Composable
 private fun SkeletonBlock(
-    brush: Brush,
+    brush: State<Brush>,
     width: Dp,
     height: Dp,
     cornerRadius: Dp,
@@ -256,16 +266,16 @@ private fun SkeletonBlock(
             .width(width)
             .height(height)
             .clip(RoundedCornerShape(cornerRadius))
-            .background(brush),
+            .skeletonBackground(brush),
     )
 }
 
 @Composable
-private fun SkeletonDot(brush: Brush) {
+private fun SkeletonDot(brush: State<Brush>) {
     Box(
         modifier = Modifier
             .size(4.dp)
             .clip(CircleShape)
-            .background(brush),
+            .skeletonBackground(brush),
     )
 }

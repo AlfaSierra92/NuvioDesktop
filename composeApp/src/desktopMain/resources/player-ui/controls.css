@@ -1765,6 +1765,18 @@ button svg * {
   animation: center-spin 760ms linear infinite;
 }
 
+/* These overlays fade out with opacity, so their animations otherwise keep running during
+   playback. Pause only the animations; the visibility/fade transitions still run normally.
+   Important also overrides the opening logo/title's animation shorthand above. */
+.opening-overlay:not(.visible) *,
+.opening-overlay:not(.visible)::before,
+.opening-overlay:not(.visible) *::before,
+.opening-overlay:not(.visible) *::after,
+.center-status:not(.visible) .center-spinner,
+.skip-submit-toast:not(.visible) .skip-submit-toast-title::before {
+  animation-play-state: paused !important;
+}
+
 .opening-status {
   width: 100%;
   min-height: 40px;

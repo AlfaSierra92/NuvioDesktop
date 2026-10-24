@@ -1028,6 +1028,9 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     double _initialStartSeconds;
     BOOL _controlsSyncInFlight;
     BOOL _playbackRestartReported;
+    BOOL _trackNotificationsAvailable;
+    NSString *_cachedAudioTracksJson;
+    NSString *_cachedSubtitleTracksJson;
     NSRect _lastAppliedNativeLayoutBounds;
     BOOL _lastAppliedNativeLayoutWasLiveResize;
     NSTimeInterval _lightweightResizeSettleUntil;
@@ -1068,6 +1071,8 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     _cachedPaused.store(!playWhenReady);
     _cachedLoading.store(true);
     _cachedEnded.store(false);
+    _cachedAudioTracksJson = @"[]";
+    _cachedSubtitleTracksJson = @"[]";
     _mpvEventQueue = dispatch_queue_create("com.nuvio.desktop.mpv-events", DISPATCH_QUEUE_SERIAL);
     _javaVm = javaVm;
     _eventSink = eventSink;
@@ -1485,6 +1490,15 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         @throw [NSException exceptionWithName:@"PlayerBridgeError" reason:reason userInfo:nil];
     }
 
+    // Property notifications also cover tracks added/removed after loading and primary/secondary
+    // selection changes. Keep all expensive per-track reads on the event queue, never JNI callers.
+    _trackNotificationsAvailable = YES;
+    for (const char *property : {"track-list", "aid", "sid", "secondary-sid"}) {
+        if (mpv_observe_property(_mpv, 1, property, MPV_FORMAT_NONE) < 0) {
+            _trackNotificationsAvailable = NO; // Preserve polling if observation is unavailable.
+        }
+    }
+
     NSString *renderError = nil;
     if (![_videoView createMpvRenderContext:_mpv error:&renderError]) {
         NSString *reason = renderError ?: @"mpv render context failed";
@@ -1540,14 +1554,20 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
             // Polling properties alone leaves it permanently "loading", triggering its stall
             // recovery even while libmpv is already decoding and presenting the video.
             NSMutableArray<NSDictionary *> *events = [NSMutableArray array];
+            BOOL refreshTracks = !self->_trackNotificationsAvailable;
             for (int count = 0; count < 128; count++) {
                 mpv_event *event = mpv_wait_event(mpv, 0.0);
                 if (!event || event->event_id == MPV_EVENT_NONE) break;
                 switch (event->event_id) {
                     case MPV_EVENT_START_FILE:
                         self->_playbackRestartReported = NO;
+                        refreshTracks = YES;
+                        break;
+                    case MPV_EVENT_PROPERTY_CHANGE:
+                        if (event->reply_userdata == 1) refreshTracks = YES;
                         break;
                     case MPV_EVENT_FILE_LOADED:
+                        refreshTracks = YES;
                         [events addObject:@{ @"type": @"fileLoaded", @"value": @1 }];
                         break;
                     case MPV_EVENT_PLAYBACK_RESTART:
@@ -1570,6 +1590,15 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                     }
                     default:
                         break;
+                }
+            }
+
+            if (refreshTracks) {
+                NSString *audio = [self tracksJsonForType:@"audio"];
+                NSString *subtitles = [self tracksJsonForType:@"sub"];
+                @synchronized (self) {
+                    self->_cachedAudioTracksJson = audio;
+                    self->_cachedSubtitleTracksJson = subtitles;
                 }
             }
 
@@ -1980,11 +2009,15 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 }
 
 - (NSString *)audioTracksJson {
-    return [self tracksJsonForType:@"audio"];
+    @synchronized (self) {
+        return _cachedAudioTracksJson ?: @"[]";
+    }
 }
 
 - (NSString *)subtitleTracksJson {
-    return [self tracksJsonForType:@"sub"];
+    @synchronized (self) {
+        return _cachedSubtitleTracksJson ?: @"[]";
+    }
 }
 
 - (void)toggleStatsOverlay {
