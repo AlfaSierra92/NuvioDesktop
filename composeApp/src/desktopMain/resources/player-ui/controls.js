@@ -317,6 +317,8 @@ let state = {
   desktopHdrModeLabel: "Auto",
   desktopColorProfileLabel: "Neutral",
   desktopAnimeModeLabel: "Off",
+  windowsVideoEnhancementsSupported: false,
+  autoCropSupported: false,
   desktopAnimeSvpEnabled: false,
   rtxVsrEnabled: false,
   rtxTrueHdrEnabled: false,
@@ -768,7 +770,10 @@ const setIconHref = (icon, href) => {
   if (icon && icon.getAttribute("href") !== href) icon.setAttribute("href", href);
 };
 
+const windowsVideoCommands = new Set(["keyboardCycleAnimeSvp", "toggleRtxVsr", "toggleRtxTrueHdr"]);
 const send = (type, value = 0) => {
+  if (windowsVideoCommands.has(type) && !state.windowsVideoEnhancementsSupported) return;
+  if (type === "selectResizeMode" && value === 3 && !state.autoCropSupported) return;
   if ((type === "toggle" || type === "keyboardToggle") && !state.isLocked) notePlayToggleIntent();
   const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.player;
   if (bridge) {
@@ -2285,7 +2290,7 @@ const contextMenuItems = [
         { label: "Fit", action: "resizeMode:0", selectedField: "resizeModeLabel" },
         { label: "Fill", action: "resizeMode:1", selectedField: "resizeModeLabel" },
         { label: "Zoom", action: "resizeMode:2", selectedField: "resizeModeLabel" },
-        { label: "Auto crop", action: "resizeMode:3", selectedField: "resizeModeLabel" },
+        { label: "Auto crop", capability: "autoCropSupported", action: "resizeMode:3", selectedField: "resizeModeLabel" },
       ] },
       { label: "Video settings", children: [
         { label: "Auto", action: "send:selectDesktopHdrMode:0", selectedField: "desktopHdrModeLabel" },
@@ -2302,10 +2307,10 @@ const contextMenuItems = [
         { label: "Adjust custom color…", action: "colorGradePanel" },
       ] },
       { label: "Anime shader", dynamicKey: "animeShaders", children: [] },
-      { label: "SVP interpolation", action: "send:keyboardCycleAnimeSvp", toggleKey: "desktopAnimeSvpEnabled" },
+      { label: "SVP interpolation", capability: "windowsVideoEnhancementsSupported", action: "send:keyboardCycleAnimeSvp", toggleKey: "desktopAnimeSvpEnabled" },
       // This session only; the saved defaults stay in Settings > Playback. Neither runs with SVP.
-      { label: "RTX Super Resolution", action: "send:toggleRtxVsr", toggleKey: "rtxVsrEnabled" },
-      { label: "RTX True HDR", action: "send:toggleRtxTrueHdr", toggleKey: "rtxTrueHdrEnabled" },
+      { label: "RTX Super Resolution", capability: "windowsVideoEnhancementsSupported", action: "send:toggleRtxVsr", toggleKey: "rtxVsrEnabled" },
+      { label: "RTX True HDR", capability: "windowsVideoEnhancementsSupported", action: "send:toggleRtxTrueHdr", toggleKey: "rtxTrueHdrEnabled" },
       { label: "Advanced (mpv)", dynamicKey: "mpvOptions", children: [] },
       { label: "UI scale", children: uiScalePresetItems },
       { label: "Controls layout", children: hudLayoutItems },
@@ -2647,7 +2652,7 @@ const showAspectPill = label => {
 };
 
 const cycleAspectFromControls = () => {
-  const modes = ["Fit", "Fill", "Zoom", "Auto crop"];
+  const modes = state.autoCropSupported ? ["Fit", "Fill", "Zoom", "Auto crop"] : ["Fit", "Fill", "Zoom"];
   const currentIndex = Math.max(0, modes.findIndex(mode => mode.toLowerCase() === String(state.resizeModeLabel || "Fit").toLowerCase()));
   const next = modes[(currentIndex + 1) % modes.length];
   state = { ...state, resizeModeLabel: next };
@@ -2850,6 +2855,10 @@ const buildContextMenu = (items, parent) => {
   items.forEach(item => {
     const group = document.createElement("div");
     group.className = "context-menu-group";
+    if (item.capability) {
+      group.dataset.capability = item.capability;
+      group.hidden = !state[item.capability];
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "context-menu-item";
@@ -5353,6 +5362,9 @@ const renderChrome = () => {
   root.classList.toggle("seek-handle-hidden", state.seekHandleEnabled === false);
   root.classList.toggle("vignette-hidden", state.hudVignetteEnabled === false);
   applyHiddenHudButtons(state.hiddenHudButtons);
+  document.querySelectorAll("[data-capability]").forEach(element => {
+    element.hidden = !state[element.dataset.capability];
+  });
   // The official bar also reads the time as one "position / duration" readout, right-aligned.
   applyMinimalHudTimeLayout(minimalHud || officialHud);
   applyUltraHudLayout(ultraHud);

@@ -1209,6 +1209,7 @@ private fun ApplyLibraryQuickAccessBrowser(page: SettingsPage, titlesState: Loca
 
 private fun SettingsPage.isEnabledByFeaturePolicy(): Boolean =
     when (this) {
+        SettingsPage.Screensaver -> isDesktop
         SettingsPage.Notifications -> AppFeaturePolicy.notificationsEnabled
         SettingsPage.Plugins -> AppFeaturePolicy.pluginsEnabled
         SettingsPage.AutoDownloads,

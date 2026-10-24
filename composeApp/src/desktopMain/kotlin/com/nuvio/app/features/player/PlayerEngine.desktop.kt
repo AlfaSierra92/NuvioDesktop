@@ -1276,6 +1276,8 @@ private fun applyDesktopVideoProfile(
         .desktopMpvPropertyOverrides[DESKTOP_DISPLAY_PANEL_OVERRIDE_KEY]
     if (DesktopHostOs.current == DesktopHostOs.MACOS) {
         // Native code owns both libmpv's encoding and the Core Animation layer.
+        // Keep the panel preference there too, so HDR/display transitions cannot overwrite it.
+        controller.setMpvProperty(DESKTOP_DISPLAY_PANEL_OVERRIDE_KEY, displayPanel ?: "lcd")
         controller.setMpvProperty("@nuvio-hdr-mode", hdrMode.name)
     } else when (hdrMode) {
         DesktopHdrMode.Auto -> {

@@ -34,7 +34,7 @@ internal fun desktopCasSharpness(value: String?): String? {
 internal fun desktopShaderChainWithSharpen(chain: String, sharpness: String?): Pair<String, String> {
     val casPath = sharpness?.let { DesktopAnimeShaders.casSharpenPath() }
         ?: return chain to ""
-    val combined = listOf(chain, casPath).filter { it.isNotEmpty() }.joinToString(";")
+    val combined = listOf(chain, escapeMpvShaderPath(casPath)).filter { it.isNotEmpty() }.joinToString(mpvShaderPathSeparator())
     return combined to "nuvio_cas_sharpness=$sharpness"
 }
 
@@ -140,7 +140,7 @@ internal object DesktopAnimeShaders {
         val names = presetShaderNames[preset] ?: return ""
         return names
             .mapNotNull { if (lumaOnly) exportedLumaOnlyPath(it) else exportedPath(it) }
-            .joinToString(";")
+            .joinToString(mpvShaderPathSeparator()) { escapeMpvShaderPath(it) }
     }
 
     /**
@@ -200,4 +200,12 @@ internal fun anime4kLumaOnlySource(source: String): String? {
             "    vec4 nuvio_base = MAIN_tex(MAIN_pos);\n" +
             "    return vec4(nuvio_base.rgb + dot(nuvio_residual.rgb, vec3(0.2627, 0.6780, 0.0593)), nuvio_base.a);"
     }
+}
+
+internal fun mpvShaderPathSeparator(host: DesktopHostOs = DesktopHostOs.current): String =
+    if (host == DesktopHostOs.WINDOWS) ";" else ":"
+
+internal fun escapeMpvShaderPath(path: String, host: DesktopHostOs = DesktopHostOs.current): String {
+    val separator = mpvShaderPathSeparator(host)
+    return path.replace("\\", "\\\\").replace(separator, "\\$separator")
 }

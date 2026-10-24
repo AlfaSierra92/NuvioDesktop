@@ -6,6 +6,17 @@ import kotlin.test.assertTrue
 
 class SeekThumbnailPolicyTest {
 
+    @Test
+    fun seekrAlsoCoversLocalSourcesWhenNativePreviewsAreUnavailable() {
+        for (mode in listOf(DesktopSeekThumbnailMode.LocalAndSeekr, DesktopSeekThumbnailMode.Streaming)) {
+            assertTrue(seekrPreviewsEligible(mode, DesktopBufferPreset.Balanced, "/media/film.mkv", false, "key", nativePreviewsSupported = false))
+            assertFalse(seekrPreviewsEligible(mode, DesktopBufferPreset.Balanced, "/media/film.mkv", false, "key", nativePreviewsSupported = true))
+            assertFalse(seekrPreviewsEligible(mode, DesktopBufferPreset.Metered, "/media/film.mkv", false, "key", nativePreviewsSupported = false))
+            assertFalse(seekrPreviewsEligible(mode, DesktopBufferPreset.Balanced, "/media/film.mkv", false, "", nativePreviewsSupported = false))
+        }
+        assertFalse(seekrPreviewsEligible(DesktopSeekThumbnailMode.Off, DesktopBufferPreset.Balanced, "/media/film.mkv", false, "key", nativePreviewsSupported = false))
+    }
+
     private fun allowed(
         mode: DesktopSeekThumbnailMode,
         url: String,

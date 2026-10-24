@@ -1,5 +1,7 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.isDesktop
+import com.nuvio.app.isWindows
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.safeContent
@@ -129,7 +131,7 @@ internal fun PlayerResizeMode.next(): PlayerResizeMode =
     when (this) {
         PlayerResizeMode.Fit -> PlayerResizeMode.Fill
         PlayerResizeMode.Fill -> PlayerResizeMode.Zoom
-        PlayerResizeMode.Zoom -> PlayerResizeMode.AutoCrop
+        PlayerResizeMode.Zoom -> if (isDesktop && !isWindows) PlayerResizeMode.Fit else PlayerResizeMode.AutoCrop
         PlayerResizeMode.AutoCrop -> PlayerResizeMode.Fit
     }
 
@@ -195,3 +197,7 @@ internal fun normalizePlaybackSpeedToggleRange(low: Float, high: Float): Pair<Fl
         (orderedHigh - PlaybackSpeedToggleMinGapSteps) / 20f to orderedHigh / 20f
     }
 }
+
+/** Auto crop currently depends on the Windows native frame probe. */
+internal fun PlayerResizeMode.supportedOnCurrentPlatform(): PlayerResizeMode =
+    if (this == PlayerResizeMode.AutoCrop && isDesktop && !isWindows) PlayerResizeMode.Fit else this

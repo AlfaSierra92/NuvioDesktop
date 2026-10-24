@@ -1317,25 +1317,27 @@ private fun PlaybackSettingsSection(
                                 onClick = PlayerSettingsRepository::resetDesktopColorTuning,
                             )
                         }
-                        SettingsGroupDivider(isTablet = isTablet)
-                        SettingsChoiceRow(
-                            title = stringResource(Res.string.settings_playback_desktop_renderer),
-                            description = autoPlayPlayerSettings.desktopRendererApi.description,
-                            options = DesktopRendererApi.entries.map { SettingsChoiceOption(it, it.label) },
-                            selectedValue = autoPlayPlayerSettings.desktopRendererApi,
-                            isTablet = isTablet,
-                            modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.DesktopRenderer),
-                            onSelected = PlayerSettingsRepository::setDesktopRendererApi,
-                        )
-                        SettingsGroupDivider(isTablet = isTablet)
-                        SettingsSwitchRow(
-                            title = stringResource(Res.string.settings_playback_desktop_hdr_ui_compensation),
-                            description = stringResource(Res.string.settings_playback_desktop_hdr_ui_compensation_description),
-                            checked = autoPlayPlayerSettings.desktopHdrUiCompensationEnabled,
-                            isTablet = isTablet,
-                            modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.searchKey("hdr-ui-compensation")),
-                            onCheckedChange = PlayerSettingsRepository::setDesktopHdrUiCompensation,
-                        )
+                        if (isWindows) {
+                            SettingsGroupDivider(isTablet = isTablet)
+                            SettingsChoiceRow(
+                                title = stringResource(Res.string.settings_playback_desktop_renderer),
+                                description = autoPlayPlayerSettings.desktopRendererApi.description,
+                                options = DesktopRendererApi.entries.map { SettingsChoiceOption(it, it.label) },
+                                selectedValue = autoPlayPlayerSettings.desktopRendererApi,
+                                isTablet = isTablet,
+                                modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.DesktopRenderer),
+                                onSelected = PlayerSettingsRepository::setDesktopRendererApi,
+                            )
+                            SettingsGroupDivider(isTablet = isTablet)
+                            SettingsSwitchRow(
+                                title = stringResource(Res.string.settings_playback_desktop_hdr_ui_compensation),
+                                description = stringResource(Res.string.settings_playback_desktop_hdr_ui_compensation_description),
+                                checked = autoPlayPlayerSettings.desktopHdrUiCompensationEnabled,
+                                isTablet = isTablet,
+                                modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.searchKey("hdr-ui-compensation")),
+                                onCheckedChange = PlayerSettingsRepository::setDesktopHdrUiCompensation,
+                            )
+                        }
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsSwitchRow(
                             title = stringResource(Res.string.settings_playback_desktop_steady_frame_pacing),
@@ -1345,15 +1347,17 @@ private fun PlaybackSettingsSection(
                             modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.searchKey("steady-frame-pacing")),
                             onCheckedChange = PlayerSettingsRepository::setDesktopSteadyFramePacing,
                         )
-                        SettingsGroupDivider(isTablet = isTablet)
-                        SettingsChoiceRow(
-                            title = stringResource(Res.string.settings_playback_desktop_low_vram),
-                            description = autoPlayPlayerSettings.desktopLowVramMode.description,
-                            options = DesktopLowVramMode.entries.map { SettingsChoiceOption(it, it.label) },
-                            selectedValue = autoPlayPlayerSettings.desktopLowVramMode,
-                            isTablet = isTablet,
-                            onSelected = PlayerSettingsRepository::setDesktopLowVramMode,
-                        )
+                        if (isWindows) {
+                            SettingsGroupDivider(isTablet = isTablet)
+                            SettingsChoiceRow(
+                                title = stringResource(Res.string.settings_playback_desktop_low_vram),
+                                description = autoPlayPlayerSettings.desktopLowVramMode.description,
+                                options = DesktopLowVramMode.entries.map { SettingsChoiceOption(it, it.label) },
+                                selectedValue = autoPlayPlayerSettings.desktopLowVramMode,
+                                isTablet = isTablet,
+                                onSelected = PlayerSettingsRepository::setDesktopLowVramMode,
+                            )
+                        }
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsChoiceRow(
                             title = stringResource(Res.string.settings_playback_desktop_buffer_preset),
@@ -1367,9 +1371,21 @@ private fun PlaybackSettingsSection(
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsChoiceRow(
                             title = stringResource(Res.string.settings_playback_desktop_seek_thumbnails),
-                            description = autoPlayPlayerSettings.desktopSeekThumbnailMode.description,
-                            options = DesktopSeekThumbnailMode.entries.map { SettingsChoiceOption(it, it.label) },
-                            selectedValue = autoPlayPlayerSettings.desktopSeekThumbnailMode,
+                            description = if (isDesktop && !isWindows) {
+                                stringResource(Res.string.settings_playback_seekr_only_description)
+                            } else autoPlayPlayerSettings.desktopSeekThumbnailMode.description,
+                            options = if (isDesktop && !isWindows) {
+                                listOf(
+                                    SettingsChoiceOption(DesktopSeekThumbnailMode.Off, DesktopSeekThumbnailMode.Off.label),
+                                    SettingsChoiceOption(DesktopSeekThumbnailMode.LocalAndSeekr, "Seekr"),
+                                )
+                            } else DesktopSeekThumbnailMode.entries.map { SettingsChoiceOption(it, it.label) },
+                            selectedValue = if (isDesktop && !isWindows) {
+                                when (autoPlayPlayerSettings.desktopSeekThumbnailMode) {
+                                    DesktopSeekThumbnailMode.Off, DesktopSeekThumbnailMode.Local -> DesktopSeekThumbnailMode.Off
+                                    else -> DesktopSeekThumbnailMode.LocalAndSeekr
+                                }
+                            } else autoPlayPlayerSettings.desktopSeekThumbnailMode,
                             isTablet = isTablet,
                             modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.SeekThumbnails),
                             onSelected = PlayerSettingsRepository::setDesktopSeekThumbnailMode,
@@ -1488,25 +1504,27 @@ private fun PlaybackSettingsSection(
                                 modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSkipUltraHd),
                                 onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSkipUltraHdEnabled,
                             )
-                            SettingsGroupDivider(isTablet = isTablet)
-                            SettingsSwitchRow(
-                                title = stringResource(Res.string.settings_playback_desktop_anime_svp),
-                                description = stringResource(Res.string.settings_playback_desktop_anime_svp_desc),
-                                checked = autoPlayPlayerSettings.desktopAnimeSvpEnabled,
-                                isTablet = isTablet,
-                                modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSvp),
-                                onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSvpEnabled,
-                            )
-                            if (autoPlayPlayerSettings.desktopAnimeSvpEnabled) {
+                            if (isWindows) {
                                 SettingsGroupDivider(isTablet = isTablet)
                                 SettingsSwitchRow(
-                                    title = stringResource(Res.string.settings_playback_desktop_anime_svp_overlay),
-                                    description = stringResource(Res.string.settings_playback_desktop_anime_svp_overlay_desc),
-                                    checked = autoPlayPlayerSettings.desktopAnimeSvpDebugOverlayEnabled,
+                                    title = stringResource(Res.string.settings_playback_desktop_anime_svp),
+                                    description = stringResource(Res.string.settings_playback_desktop_anime_svp_desc),
+                                    checked = autoPlayPlayerSettings.desktopAnimeSvpEnabled,
                                     isTablet = isTablet,
-                                    modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSvpOverlay),
-                                    onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSvpDebugOverlayEnabled,
+                                    modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSvp),
+                                    onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSvpEnabled,
                                 )
+                                if (autoPlayPlayerSettings.desktopAnimeSvpEnabled) {
+                                    SettingsGroupDivider(isTablet = isTablet)
+                                    SettingsSwitchRow(
+                                        title = stringResource(Res.string.settings_playback_desktop_anime_svp_overlay),
+                                        description = stringResource(Res.string.settings_playback_desktop_anime_svp_overlay_desc),
+                                        checked = autoPlayPlayerSettings.desktopAnimeSvpDebugOverlayEnabled,
+                                        isTablet = isTablet,
+                                        modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSvpOverlay),
+                                        onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSvpDebugOverlayEnabled,
+                                    )
+                                }
                             }
                         }
                         SettingsGroupDivider(isTablet = isTablet)
@@ -4898,7 +4916,7 @@ private fun formatP2pCacheBytes(bytes: Long): String {
 /** Desktop HUD buttons the user can switch off; values are controls.html `data-command`s. */
 @Composable
 private fun HiddenHudButtonsRow(hidden: Set<String>, isTablet: Boolean) {
-    val options = listOf(
+    val options = listOfNotNull(
         SettingsChoiceOption("previousEpisode", stringResource(Res.string.settings_playback_hud_button_previous_episode)),
         SettingsChoiceOption("seekBack", stringResource(Res.string.settings_playback_hud_button_seek_back)),
         SettingsChoiceOption("seekForward", stringResource(Res.string.settings_playback_hud_button_seek_forward)),
@@ -4910,7 +4928,7 @@ private fun HiddenHudButtonsRow(hidden: Set<String>, isTablet: Boolean) {
         SettingsChoiceOption("keyboardCycleHdrMode", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_hdr_mode)),
         SettingsChoiceOption("keyboardCycleColorProfile", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_color_profile)),
         SettingsChoiceOption("keyboardCycleAnimeMode", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_mode)),
-        SettingsChoiceOption("keyboardCycleAnimeSvp", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_svp)),
+        if (isWindows) SettingsChoiceOption("keyboardCycleAnimeSvp", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_svp)) else null,
         SettingsChoiceOption("sources", stringResource(Res.string.settings_playback_hud_button_sources)),
         SettingsChoiceOption("episodes", stringResource(Res.string.settings_playback_hud_button_episodes)),
         SettingsChoiceOption("submitIntro", stringResource(Res.string.settings_playback_hud_button_submit_intro)),

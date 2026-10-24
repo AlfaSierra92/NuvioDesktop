@@ -23,6 +23,7 @@ import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
+import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JWindow
 import javax.swing.SwingUtilities
@@ -42,7 +43,7 @@ import kotlin.math.roundToInt
  * hierarchy, and an owned window follows its owner in z-order, so it is never left hanging over
  * another program the user has switched to. `setOpacity` gives the dim level for free.
  *
- * **Idle time** is Windows' own (`GetLastInputInfo` via the bridge): mouse movement over the mpv
+ * **Idle time** comes from Windows (`GetLastInputInfo`) or macOS (Quartz) via the bridge: mouse movement over the mpv
  * surface and keys into the HUD never reach AWT, so in-process listeners alone would dim the
  * screen on someone plainly using it. Controllers are not input to Windows, so the gamepad
  * poller's own timestamp is folded in. AWT events are still listened to, both as the fallback
@@ -116,7 +117,7 @@ internal object DesktopScreensaver {
 
     /** Last AWT input seen, for the fallback idle clock when the bridge cannot be loaded. */
     @Volatile
-    private var lastAwtInputAtMs = System.currentTimeMillis()
+    private var lastAwtInputAtMs = monotonicMs()
 
     /** Where the pointer was when the shade went up; motion is measured against this. */
     @Volatile
@@ -132,13 +133,15 @@ internal object DesktopScreensaver {
     private var nativeIdleUnavailable = false
 
     /**
-     * Installs the idle watch against [window]. Returns the uninstaller. No-op off Windows: the
-     * idle probe and the shutdown command are both Windows-only, and this fork ships nowhere else.
+     * Installs the idle watch on Windows and macOS. Returns the uninstaller.
      */
     fun install(window: Window, exitApplication: () -> Unit): () -> Unit {
-        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return {}
+        if (DesktopHostOs.current !in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS)) return {}
         uninstall()
         owner = window
+        shutdownIssued = false
+        nativeIdleUnavailable = false
+        lastAwtInputAtMs = monotonicMs()
         this.exitApplication = exitApplication
         ScreensaverSettingsRepository.ensureLoaded()
 
@@ -188,7 +191,7 @@ internal object DesktopScreensaver {
     }
 
     private fun onInput() {
-        lastAwtInputAtMs = System.currentTimeMillis()
+        lastAwtInputAtMs = monotonicMs()
         // Lift the shade straight away rather than on the next tick: the shade is also where the
         // first mouse movement lands, and a second of black after touching the mouse feels stuck.
         if (shade?.isVisible == true) {
@@ -208,40 +211,28 @@ internal object DesktopScreensaver {
         val settings = ScreensaverSettingsRepository.snapshot()
         val windowShowing = window.isShowing &&
             ((window as? Frame)?.extendedState ?: 0) and Frame.ICONIFIED == 0
-        val suppressedByPlayback = playerActive && !settings.activeDuringPlayback
-        if (!settings.anyActionEnabled || !windowShowing || suppressedByPlayback) {
-            wake()
-            return
-        }
-
         val idleMs = idleMs()
-        val now = System.currentTimeMillis()
-        // Sampled once per tick so both decisions see the same answer. Watching is idle to the
-        // timer, so the player gets its own, longer delays.
-        val inPlayer = playerActive
-
-        val wantShutdown = settings.shutdownEnabled &&
-            idleMs >= settings.shutdownDelayMinutes(inPlayer) * 60_000L &&
-            isForeground(window)
-        if (wantShutdown) {
-            if (countdownStartedAtMs == null) {
-                log.i { "idle ${idleMs / 1000}s with the window in front; shutdown countdown started" }
-                countdownStartedAtMs = now
-            }
-        } else {
-            countdownStartedAtMs = null
+        val decision = screensaverIdleDecision(
+            settings = settings,
+            playerActive = playerActive,
+            windowShowing = windowShowing,
+            foreground = isForeground(window),
+            shutdownAvailable = DesktopHostOs.current != DesktopHostOs.MACOS || !nativeIdleUnavailable,
+            idleMs = idleMs,
+            nowMs = monotonicMs(),
+            countdownStartedAtMs = countdownStartedAtMs,
+        )
+        if (countdownStartedAtMs == null && decision.countdownStartedAtMs != null) {
+            log.i { "idle ${idleMs / 1000}s with the window in front; shutdown countdown started" }
         }
-        val countdownRemainingSeconds = countdownStartedAtMs?.let { startedAt ->
-            SCREENSAVER_SHUTDOWN_COUNTDOWN_SECONDS - ((now - startedAt) / 1_000L).toInt()
-        }
-        if (countdownRemainingSeconds != null && countdownRemainingSeconds <= 0) {
+        countdownStartedAtMs = decision.countdownStartedAtMs
+        val countdownRemainingSeconds = decision.countdownRemainingSeconds
+        if (decision.shutdownDue) {
             performShutdown()
             return
         }
-
-        val wantDim = settings.enabled && idleMs >= settings.dimDelayMinutes(inPlayer) * 60_000L
-        if (!wantDim && countdownRemainingSeconds == null) {
-            shade?.fadeOut()
+        if (!decision.dim && countdownRemainingSeconds == null) {
+            wake()
             return
         }
         val dimOpacity = settings.dimPercent / 100f
@@ -250,7 +241,7 @@ internal object DesktopScreensaver {
         if (!shade.isVisible) {
             log.i {
                 "idle ${idleMs / 1000}s; dimming to ${settings.dimPercent}%" +
-                    (if (inPlayer) " (player open)" else "")
+                    (if (playerActive) " (player open)" else "")
             }
             restingPointer = MouseInfo.getPointerInfo()?.location
         }
@@ -258,7 +249,7 @@ internal object DesktopScreensaver {
     }
 
     /**
-     * Foreground per Windows when the bridge is there (see [NativePlayerBridge.isForegroundProcess]);
+     * Foreground per the operating system when the bridge is there (see [NativePlayerBridge.isForegroundProcess]);
      * AWT's own notion otherwise.
      */
     private fun isForeground(window: Window): Boolean {
@@ -272,9 +263,11 @@ internal object DesktopScreensaver {
      * bridge is unavailable, which then simply cannot see input the native player swallowed.
      */
     private fun idleMs(): Long {
-        val systemIdle = systemIdleMs() ?: (System.currentTimeMillis() - lastAwtInputAtMs).coerceAtLeast(0L)
-        val padIdle = GamepadInput.idleMs() ?: return systemIdle
-        return min(systemIdle, padIdle)
+        val systemIdle = systemIdleMs() ?: (monotonicMs() - lastAwtInputAtMs).coerceAtLeast(0L)
+        // Count fresh in-app input and the start of this watcher even if the system clock is old.
+        val localIdle = (monotonicMs() - lastAwtInputAtMs).coerceAtLeast(0L)
+        val padIdle = GamepadInput.idleMs() ?: Long.MAX_VALUE
+        return min(systemIdle, min(localIdle, padIdle))
     }
 
     private fun systemIdleMs(): Long? {
@@ -292,16 +285,21 @@ internal object DesktopScreensaver {
     private fun performShutdown() {
         shutdownIssued = true
         countdownStartedAtMs = null
-        val systemRoot = System.getenv("SystemRoot")?.takeIf { it.isNotBlank() } ?: "C:\\Windows"
-        val command = listOf("$systemRoot\\System32\\shutdown.exe", "/s", "/f", "/t", "0")
-        log.i { "idle shutdown: ${command.joinToString(" ")}" }
-        val started = runCatching { ProcessBuilder(command).start() }
-            .onFailure { log.e(it) { "shutdown command failed to start" } }
-            .isSuccess
+        val started = runCatching {
+            if (DesktopHostOs.current == DesktopHostOs.MACOS) {
+                NativePlayerBridge.requestMacosShutdown(confirmed = true)
+            } else {
+                val systemRoot = System.getenv("SystemRoot")?.takeIf { it.isNotBlank() } ?: "C:\\Windows"
+                ProcessBuilder("$systemRoot\\System32\\shutdown.exe", "/s", "/f", "/t", "0").start()
+                true
+            }
+        }.onFailure { log.e(it) { "shutdown request failed" } }.getOrDefault(false)
         if (!started) {
             // Nothing is going to turn the PC off; behave as if the countdown was cancelled and
             // do not try again this session — the failure is not going to fix itself.
             shade?.fadeOut()
+            JOptionPane.showMessageDialog(owner, "The system could not start shutdown. Nuvio will remain open.",
+                "Automatic shutdown", JOptionPane.ERROR_MESSAGE)
             return
         }
         // Leave through the normal exit so pending cache writes and watch progress are flushed
@@ -426,3 +424,5 @@ internal object DesktopScreensaver {
         }
     }
 }
+
+private fun monotonicMs(): Long = System.nanoTime() / 1_000_000L

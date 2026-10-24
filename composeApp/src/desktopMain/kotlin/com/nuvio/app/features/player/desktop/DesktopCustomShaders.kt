@@ -16,9 +16,10 @@ internal object DesktopCustomShaders {
 
     fun shaderChain(pathsText: String, selectedPath: String): String {
         val available = availableShaders(pathsText)
-        return available.firstOrNull { it.path == selectedPath }?.path
+        val path = available.firstOrNull { it.path == selectedPath }?.path
             ?: available.firstOrNull()?.path
-            ?: ""
+            ?: return ""
+        return escapeMpvShaderPath(path)
     }
 
     private var cachedPaths: String? = null

@@ -1,5 +1,6 @@
 package com.nuvio.app.features.settings
 
+import com.nuvio.app.isWindows
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -451,23 +452,25 @@ private fun AccountSettingsBody(
                             AppUpdaterController.recheckActiveController()
                         },
                     )
-                    SettingsGroupDivider(isTablet = isTablet)
-                    var autoInstall by rememberSaveable {
-                        mutableStateOf(AppUpdaterPlatform.isInPlaceUpdateEnabled())
+                    if (isWindows) {
+                        SettingsGroupDivider(isTablet = isTablet)
+                        var autoInstall by rememberSaveable {
+                            mutableStateOf(AppUpdaterPlatform.isInPlaceUpdateEnabled())
+                        }
+                        SettingsSwitchRow(
+                            title = stringResource(Res.string.settings_updates_auto_install),
+                            description = stringResource(Res.string.settings_updates_auto_install_description),
+                            checked = autoInstall,
+                            isTablet = isTablet,
+                            modifier = Modifier.settingsScrollAnchor(
+                                SettingsScrollAnchor.searchKey("auto-install-updates"),
+                            ),
+                            onCheckedChange = { value ->
+                                autoInstall = value
+                                AppUpdaterPlatform.setInPlaceUpdateEnabled(value)
+                            },
+                        )
                     }
-                    SettingsSwitchRow(
-                        title = stringResource(Res.string.settings_updates_auto_install),
-                        description = stringResource(Res.string.settings_updates_auto_install_description),
-                        checked = autoInstall,
-                        isTablet = isTablet,
-                        modifier = Modifier.settingsScrollAnchor(
-                            SettingsScrollAnchor.searchKey("auto-install-updates"),
-                        ),
-                        onCheckedChange = { value ->
-                            autoInstall = value
-                            AppUpdaterPlatform.setInPlaceUpdateEnabled(value)
-                        },
-                    )
                 }
                 if (PortableMode.isSupported) {
                     SettingsGroup(isTablet = isTablet) {

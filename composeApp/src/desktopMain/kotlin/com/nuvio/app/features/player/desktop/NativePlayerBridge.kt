@@ -166,11 +166,14 @@ internal object NativePlayerBridge {
 
     /**
      * Milliseconds since the last keyboard or mouse input anywhere on the desktop (Windows'
-     * `GetLastInputInfo`), or -1 if that could not be read. Controllers are not included; see
+     * `GetLastInputInfo`) or macOS Quartz, or -1 if that could not be read. Controllers are not included; see
      * `DesktopScreensaver` for how they are folded in. Same reason for living here as
      * [pollGamepads].
      */
     external fun systemIdleMs(): Long
+
+    /** macOS shutdown request; false only probes JNI linkage and never sends a system event. */
+    external fun requestMacosShutdown(confirmed: Boolean): Boolean
 
     /**
      * Holds (or releases) a keep-awake request for the display and system while a video plays.

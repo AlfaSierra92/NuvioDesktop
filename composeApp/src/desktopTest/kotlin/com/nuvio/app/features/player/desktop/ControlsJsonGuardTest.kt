@@ -24,6 +24,26 @@ import kotlin.test.assertTrue
  */
 class ControlsJsonGuardTest {
 
+    @Test
+    fun `platform capabilities reject saved Windows features on macOS`() {
+        val state = PlayerControlsState(
+            desktopAnimeSvpEnabled = true,
+            rtxVsrEnabled = true,
+            rtxTrueHdrEnabled = true,
+            seekThumbnailsEnabled = true,
+        )
+        for (host in listOf(DesktopHostOs.MACOS, DesktopHostOs.WINDOWS)) {
+            val payload = state.toControlsJson(122, emptyMap(), "S", host)
+            assertTrue(controlsJsonIsWellFormed(payload))
+            val fields = Json.parseToJsonElement(payload).jsonObject
+            val expected = (host == DesktopHostOs.WINDOWS).toString()
+            for (key in listOf("windowsVideoEnhancementsSupported", "autoCropSupported",
+                "desktopAnimeSvpEnabled", "rtxVsrEnabled", "rtxTrueHdrEnabled", "seekThumbnailsEnabled")) {
+                assertEquals(expected, fields.getValue(key).jsonPrimitive.content, "$host: $key")
+            }
+        }
+    }
+
     private val wellFormed =
         """{"title":"Some Title","uiScalePercent":-20,"themeAccentStrongColor":"#3c7bff",""" +
             """"themeAccentFill":"#2f6fed","themeOnAccentColor":"#fff"}"""

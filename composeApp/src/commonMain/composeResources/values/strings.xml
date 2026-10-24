@@ -1430,7 +1430,7 @@
     <string name="settings_lights_webhook_url_placeholder">https://…</string>
     <string name="settings_lights_webhook_url_description">The full URL to call for this event. Leave blank to skip it</string>
     <string name="compose_settings_page_screensaver">Screensaver</string>
-    <string name="settings_screensaver_description">Dim the screen after a period of no input, and optionally shut the PC down</string>
+    <string name="settings_screensaver_description">Dim the screen after a period of no input, and optionally shut the computer down</string>
     <string name="settings_screensaver_section_title">Screensaver</string>
     <string name="settings_screensaver_enable">Enable screensaver</string>
     <string name="settings_screensaver_enable_description">Fade the window towards black once nothing has been touched for the time below. Any mouse, keyboard or controller input brings it straight back</string>
@@ -1443,8 +1443,8 @@
     <string name="settings_screensaver_during_playback">Active during playback</string>
     <string name="settings_screensaver_during_playback_description">If enabled, will apply during playback.</string>
     <string name="settings_screensaver_section_shutdown">Shut down</string>
-    <string name="settings_screensaver_shutdown_enable">Shut down PC when idle</string>
-    <string name="settings_screensaver_shutdown_enable_description">Turn the PC off once nothing has been touched for the time below. A 30 second countdown is shown first and any input cancels it. Only while Nuvio is the active window; other programs are closed without saving</string>
+    <string name="settings_screensaver_shutdown_enable">Shut down computer when idle</string>
+    <string name="settings_screensaver_shutdown_enable_description">Turn the computer off once nothing has been touched for the time below. A 30 second countdown is shown first and any input cancels it. Only while Nuvio is the active window. Save work in other apps before enabling this option</string>
     <string name="settings_screensaver_shutdown_idle_time">Shut down after (browsing)</string>
     <string name="settings_screensaver_shutdown_idle_time_description">How long without input before the countdown starts while the player is closed.</string>
     <string name="settings_screensaver_playback_shutdown_idle_time">Shut down after (playback)</string>
@@ -2613,7 +2613,7 @@
     <string name="updates_github_link">GitHub</string>
     <string name="updates_target_published">Published %1$s UTC</string>
     <string name="updates_target_version">Version %1$s</string>
-    <string name="updates_update_asset_missing">No compatible Windows portable ZIP was found in the release.</string>
+    <string name="updates_update_asset_missing">No compatible update package for this operating system and processor was found in the release.</string>
     <string name="updates_open_download">Open download</string>
     <string name="updates_remind_me">Remind me…</string>
     <string name="updates_snooze_one_day">In 1 day</string>
@@ -3896,4 +3896,7 @@
     <string name="iptv_regions_all">All regions</string>
     <string name="iptv_hud_search_channels">Search channels</string>
     <string name="iptv_hud_search_results">%1$d channels match</string>
+    <string name="settings_playback_seekr_only_description">Ready-made previews from Seekr, when available for this title. Requires a Seekr API key under Integrations. Local frame extraction is not available on this platform; missing previews show the timestamp only.</string>
+    <string name="updates_message_macos_ready">The verified Mac installer is downloaded. Open it, quit Nuvio, then drag the new app into Applications to replace the installed version.</string>
+    <string name="updates_open_macos_installer">Open installer</string>
 </resources>

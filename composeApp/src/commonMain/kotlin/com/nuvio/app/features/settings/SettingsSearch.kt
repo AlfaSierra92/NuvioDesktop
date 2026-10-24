@@ -68,6 +68,7 @@ import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.home.RandomPlayGenres
 import com.nuvio.app.features.updater.AppUpdaterPlatform
+import com.nuvio.app.isWindows
 import com.nuvio.app.isDesktop
 import com.nuvio.app.isIos
 import nuvio.composeapp.generated.resources.*
@@ -619,17 +620,19 @@ private fun settingsSearchEntries(
             description = resolve(Res.string.settings_shortcuts_search_description),
             icon = Icons.Rounded.Keyboard,
         )
-        // Controller settings share the shortcuts page (a pad press is replayed as the keystroke
-        // the same action already has), but nobody searches "keyboard" looking for a gamepad.
-        addRow(
-            page = SettingsPage.KeyboardShortcuts,
-            key = "gamepad-control",
-            title = "Gamepad control",
-            description = "Controller support: navigate Nuvio with an Xbox or XInput pad.",
-            pageLabel = resolve(Res.string.compose_settings_page_keyboard_shortcuts),
-            section = "Controller",
-            icon = Icons.Rounded.Keyboard,
-        )
+        if (isWindows) {
+            // Controller settings share the shortcuts page (a pad press is replayed as the keystroke
+            // the same action already has), but nobody searches "keyboard" looking for a gamepad.
+            addRow(
+                page = SettingsPage.KeyboardShortcuts,
+                key = "gamepad-control",
+                title = "Gamepad control",
+                description = "Controller support: navigate Nuvio with an Xbox or XInput pad.",
+                pageLabel = resolve(Res.string.compose_settings_page_keyboard_shortcuts),
+                section = "Controller",
+                icon = Icons.Rounded.Keyboard,
+            )
+        }
         addRow(
             page = SettingsPage.KeyboardShortcuts,
             key = "esc-windowed-first",
@@ -1174,16 +1177,18 @@ private fun settingsSearchEntries(
             category = accountCategory,
             icon = Icons.Rounded.CloudDownload,
         )
-        addRow(
-            page = SettingsPage.Account,
-            key = "auto-install-updates",
-            title = resolve(Res.string.settings_updates_auto_install),
-            description = resolve(Res.string.settings_updates_auto_install_description),
-            pageLabel = accountPage,
-            section = resolve(Res.string.settings_updates_section),
-            category = accountCategory,
-            icon = Icons.Rounded.CloudDownload,
-        )
+        if (isWindows) {
+            addRow(
+                page = SettingsPage.Account,
+                key = "auto-install-updates",
+                title = resolve(Res.string.settings_updates_auto_install),
+                description = resolve(Res.string.settings_updates_auto_install_description),
+                pageLabel = accountPage,
+                section = resolve(Res.string.settings_updates_section),
+                category = accountCategory,
+                icon = Icons.Rounded.CloudDownload,
+            )
+        }
         if (PortableMode.isSupported) {
             addRow(
                 page = SettingsPage.Account,
@@ -1477,13 +1482,13 @@ private fun settingsSearchEntries(
                 resolve(Res.string.settings_playback_desktop_color_custom_description),
                 fallbackAnchor = SettingsScrollAnchor.ColorProfile,
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "desktop-renderer",
                 resolve(Res.string.settings_playback_desktop_renderer),
                 resolve(Res.string.settings_playback_desktop_renderer_dialog),
                 anchor = SettingsScrollAnchor.DesktopRenderer,
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "hdr-ui-compensation",
                 resolve(Res.string.settings_playback_desktop_hdr_ui_compensation),
                 resolve(Res.string.settings_playback_desktop_hdr_ui_compensation_description),
@@ -1549,7 +1554,7 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.AnimeEnhancements,
                 fallbackTitle = resolve(Res.string.settings_playback_desktop_anime_mode),
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "desktop-anime-svp",
                 resolve(Res.string.settings_playback_desktop_anime_svp),
                 resolve(Res.string.settings_playback_desktop_anime_svp_desc),
@@ -1557,7 +1562,7 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.AnimeEnhancements,
                 fallbackTitle = resolve(Res.string.settings_playback_desktop_anime_mode),
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "desktop-anime-svp-overlay",
                 resolve(Res.string.settings_playback_desktop_anime_svp_overlay),
                 resolve(Res.string.settings_playback_desktop_anime_svp_overlay_desc),
@@ -1565,12 +1570,12 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.AnimeSvp,
                 fallbackTitle = resolve(Res.string.settings_playback_desktop_anime_svp),
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "nvidia-rtx-hdr",
                 resolve(Res.string.settings_playback_nvidia_rtx_hdr),
                 anchor = SettingsScrollAnchor.RtxHdr,
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "nvidia-rtx-hdr-anime",
                 resolve(Res.string.settings_playback_nvidia_rtx_hdr_anime),
                 resolve(Res.string.settings_playback_nvidia_rtx_hdr_anime_desc),
@@ -1578,7 +1583,7 @@ private fun settingsSearchEntries(
                 fallbackAnchor = SettingsScrollAnchor.RtxHdr,
                 fallbackTitle = resolve(Res.string.settings_playback_nvidia_rtx_hdr),
             ) else null,
-            if (isDesktop) PlaybackSearchRow(
+            if (isWindows) PlaybackSearchRow(
                 "nvidia-rtx-hdr-anime-shaders",
                 resolve(Res.string.settings_playback_nvidia_rtx_hdr_anime_shaders),
                 resolve(Res.string.settings_playback_nvidia_rtx_hdr_anime_shaders_desc),
@@ -2344,9 +2349,9 @@ private fun settingsSearchEntries(
             add(SettingsPage.Downloads)
         }
         if (!notificationsEnabled) add(SettingsPage.Notifications)
+        if (!isDesktop) add(SettingsPage.Screensaver)
         if (!isDesktop) {
             add(SettingsPage.KeyboardShortcuts)
-            add(SettingsPage.Screensaver)
             add(SettingsPage.Seekr)
             add(SettingsPage.Lights)
             add(SettingsPage.DiscordPresence)

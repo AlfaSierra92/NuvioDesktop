@@ -984,12 +984,13 @@ internal class NativePlayerController(
         val settings = PlayerSettingsRepository.uiState.value
         return when {
             settings.desktopAudioPassthroughEnabled -> "On (off during audio passthrough)"
-            settings.desktopAnimeSvpEnabled -> "On (off while SVP runs)"
+            DesktopHostOs.current == DesktopHostOs.WINDOWS && settings.desktopAnimeSvpEnabled -> "On (off while SVP runs)"
             else -> choice.label
         }
     }
 
     fun cycleDesktopAnimeSvpMode() {
+        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
         val current = PlayerSettingsRepository.uiState.value.desktopAnimeSvpEnabled
         val next = !current
         PlayerSettingsRepository.setDesktopAnimeSvpEnabled(next)
@@ -1004,6 +1005,7 @@ internal class NativePlayerController(
     // a viewer can act on from here; the others (HDR source, Windows HDR off) are in the settings.
     // The NVIDIA App switch is named too: without it the row would seem to do nothing.
     private fun toggleRtxVsrForSession() {
+        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
         val settings = PlayerSettingsRepository.uiState.value
         val next = !settings.effectiveRtxVsrEnabled
         PlayerSettingsRepository.setDesktopRtxVsrSessionOverride(next)
@@ -1012,6 +1014,7 @@ internal class NativePlayerController(
     }
 
     private fun toggleRtxTrueHdrForSession() {
+        if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
         val settings = PlayerSettingsRepository.uiState.value
         val next = !settings.effectiveRtxTrueHdrEnabled
         PlayerSettingsRepository.setDesktopRtxTrueHdrSessionOverride(next)
@@ -2310,6 +2313,7 @@ internal fun PlayerControlsState.toControlsJson(
     appFullscreenKeyCode: Int,
     playerShortcutKeyCodes: Map<String, Int>,
     skipIntervalKeyLabel: String,
+    hostOs: DesktopHostOs = DesktopHostOs.current,
 ): String =
     buildString {
         append('{')
@@ -2381,17 +2385,21 @@ internal fun PlayerControlsState.toControlsJson(
         append(',')
         appendJsonField("desktopAnimeModeLabel", desktopAnimeModeLabel)
         append(',')
-        appendJsonField("desktopAnimeSvpEnabled", desktopAnimeSvpEnabled)
+        appendJsonField("windowsVideoEnhancementsSupported", hostOs == DesktopHostOs.WINDOWS)
         append(',')
-        appendJsonField("rtxVsrEnabled", rtxVsrEnabled)
+        appendJsonField("autoCropSupported", hostOs == DesktopHostOs.WINDOWS)
         append(',')
-        appendJsonField("rtxTrueHdrEnabled", rtxTrueHdrEnabled)
+        appendJsonField("desktopAnimeSvpEnabled", desktopAnimeSvpEnabled && hostOs == DesktopHostOs.WINDOWS)
+        append(',')
+        appendJsonField("rtxVsrEnabled", rtxVsrEnabled && hostOs == DesktopHostOs.WINDOWS)
+        append(',')
+        appendJsonField("rtxTrueHdrEnabled", rtxTrueHdrEnabled && hostOs == DesktopHostOs.WINDOWS)
         append(',')
         appendJsonField("playbackInfoPanelEnabled", playbackInfoPanelEnabled)
         append(',')
         appendJsonField("activeSubtitleLabel", activeSubtitleLabel)
         append(',')
-        appendJsonField("seekThumbnailsEnabled", seekThumbnailsEnabled)
+        appendJsonField("seekThumbnailsEnabled", seekThumbnailsEnabled && hostOs == DesktopHostOs.WINDOWS)
         append(',')
         appendJsonField("seekrVttUrl", seekrVttUrl)
         append(',')

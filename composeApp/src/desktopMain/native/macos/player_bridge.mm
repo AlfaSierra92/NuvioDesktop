@@ -1,4 +1,6 @@
 #import <Cocoa/Cocoa.h>
+#import <Carbon/Carbon.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <IOKit/IOKitLib.h>
 #define GL_SILENCE_DEPRECATION
 #import <OpenGL/OpenGL.h>
@@ -79,6 +81,7 @@
 - (BOOL)flagProperty:(const char *)name fallback:(BOOL)fallback;
 - (void)setSubtitleAssStyleMode:(NSString *)mode scale:(double)scale;
 - (void)setHdrMode:(NSString *)mode;
+- (void)setDisplayPanel:(NSString *)panel;
 - (void)setPaused:(BOOL)paused;
 - (BOOL)isPaused;
 - (void)seekToMilliseconds:(long long)positionMs;
@@ -1015,6 +1018,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     jmethodID _eventMethod;
     NSString *_lastConfiguredHdrKey;
     NSString *_requestedHdrMode;
+    BOOL _displayPanelOled;
     NSString *_lastResizeRefreshKey;
     dispatch_queue_t _mpvEventQueue;
     BOOL _didFocusControlsWebView;
@@ -1656,6 +1660,14 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     [self configureHdrForCurrentScreenWithReason:@"mode-change" force:YES];
 }
 
+- (void)setDisplayPanel:(NSString *)panel {
+    if (![@[@"lcd", @"oled"] containsObject:panel]) return;
+    const BOOL oled = [panel isEqualToString:@"oled"];
+    if (_displayPanelOled == oled) return;
+    _displayPanelOled = oled;
+    [self configureHdrForCurrentScreenWithReason:@"display-panel-change" force:YES];
+}
+
 - (void)configureHdrForCurrentScreenWithReason:(NSString *)reason force:(BOOL)force {
     [self applyHdrForPolledGamma:[self stringProperty:"video-params/gamma" fallback:@""]
                       primaries:[self stringProperty:"video-params/primaries" fallback:@""]
@@ -1672,9 +1684,9 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         : [modeName isEqualToString:@"AlwaysPassthrough"] ? MacosHdrMode::Passthrough : MacosHdrMode::Auto;
     const double headroom = [_videoView edrMax];
     const double peak = normalizedHdrMetadataMaxNits([_videoView hdrTargetPeakNits]);
-    const MacosHdrOutput output = macosHdrOutput(mode, sourceHdr, headroom);
-    NSString *stateKey = [NSString stringWithFormat:@"%@:%@:%@:%0.2f:%0.0f", modeName,
-        normalizedGamma, primaries ?: @"", headroom, peak];
+    const MacosHdrOutput output = macosHdrOutput(mode, sourceHdr, headroom, _displayPanelOled);
+    NSString *stateKey = [NSString stringWithFormat:@"%@:%@:%@:%0.2f:%0.0f:%d", modeName,
+        normalizedGamma, primaries ?: @"", headroom, peak, (int)_displayPanelOled];
     if (!force && [_lastConfiguredHdrKey isEqualToString:stateKey]) return;
 
     // One main-thread owner: never queue an older automatic HDR write after a newer mode.
@@ -1688,7 +1700,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     mpv_set_property_string(_mpv, "target-trc", output.transfer);
     NSString *targetPeak = output.extendedRange ? [NSString stringWithFormat:@"%.0f", peak] : @"203";
     mpv_set_property_string(_mpv, "target-peak", targetPeak.UTF8String);
-    mpv_set_property_string(_mpv, "target-contrast", output.extendedRange ? "auto" : "1000");
+    mpv_set_property_string(_mpv, "target-contrast", output.targetContrast);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [_videoView configureExtendedDynamicRange:output.extendedRange
@@ -1892,18 +1904,13 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 
 - (void)setResizeMode:(int)mode {
     if (!_mpv) return;
-    NSString *panscan = @"0.0";
-    switch (mode) {
-        case 1:
-        case 2:
-            panscan = @"1.0";
-            break;
-        default:
-            break;
-    }
+    // Fill stretches; Zoom preserves the aspect ratio and crops the edges.
+    NSString *keepaspect = mode == 1 ? @"no" : @"yes";
+    NSString *panscan = mode == 2 ? @"1.0" : @"0.0";
 
     dispatch_queue_t queue = _mpvEventQueue;
     if (!queue) {
+        [self setStringProperty:"keepaspect" value:keepaspect];
         [self setStringProperty:"panscan" value:panscan];
         [self setStringProperty:"video-unscaled" value:@"no"];
         return;
@@ -1914,6 +1921,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         if (!mpv) {
             return;
         }
+        mpv_set_property_string(mpv, "keepaspect", keepaspect.UTF8String);
         mpv_set_property_string(mpv, "panscan", panscan.UTF8String);
         mpv_set_property_string(mpv, "video-unscaled", "no");
     });
@@ -2947,6 +2955,10 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMpvProperty(
         runOnMainAsync(^{ [player setHdrMode:[NSString stringWithUTF8String:valueText.c_str()]]; });
         return;
     }
+    if (keyText == "@nuvio-display-panel") {
+        runOnMainAsync(^{ [player setDisplayPanel:[NSString stringWithUTF8String:valueText.c_str()]]; });
+        return;
+    }
     // Other internal Windows/SVP directives are not libmpv properties.
     if (keyText.empty() || keyText[0] == '@') return;
     runOnMainAsync(^{
@@ -3038,4 +3050,47 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isMuted(
     __block double value = 0;
     runOnMainSync(^{ value = [player flagProperty:"mute" fallback:NO]; });
     return value ? JNI_TRUE : JNI_FALSE;
+}
+
+// The hardware idle clock also sees input consumed by WebKit and native video surfaces.
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_systemIdleMs(JNIEnv *, jobject) {
+    const double seconds = CGEventSourceSecondsSinceLastEventType(
+        kCGEventSourceStateHIDSystemState, kCGAnyInputEventType);
+    if (!std::isfinite(seconds) || seconds < 0.0 || seconds > (double)INT64_MAX / 1000.0) return -1;
+    return (jlong)(seconds * 1000.0);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isForegroundProcess(JNIEnv *, jobject) {
+    __block BOOL active = NO;
+    runOnMainSync(^{ active = NSApp.isActive; });
+    return active ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_requestMacosShutdown(
+    JNIEnv *, jobject, jboolean confirmed
+) {
+    // Allows linkage tests without ever triggering shutdown. Only the expired idle countdown
+    // passes true. Send the normal loginwindow event, without a shell or privileged helper.
+    if (confirmed != JNI_TRUE) return JNI_FALSE;
+    __block OSStatus status = noErr;
+    runOnMainSync(^{
+        const ProcessSerialNumber systemProcess = {0, kSystemProcess};
+        AEAddressDesc target = {typeNull, nullptr};
+        AppleEvent event = {typeNull, nullptr};
+        status = AECreateDesc(typeProcessSerialNumber, &systemProcess, sizeof(systemProcess), &target);
+        if (status == noErr) {
+            status = AECreateAppleEvent(kCoreEventClass, kAEShutDown, &target,
+                kAutoGenerateReturnID, kAnyTransactionID, &event);
+            if (status == noErr) {
+                status = AESendMessage(&event, nullptr, kAENoReply, kAEDefaultTimeout);
+            }
+        }
+        AEDisposeDesc(&event);
+        AEDisposeDesc(&target);
+    });
+    if (status != noErr) fprintf(stderr, "Warning: (Screensaver) macOS shutdown request failed: %d\n", (int)status);
+    return status == noErr ? JNI_TRUE : JNI_FALSE;
 }

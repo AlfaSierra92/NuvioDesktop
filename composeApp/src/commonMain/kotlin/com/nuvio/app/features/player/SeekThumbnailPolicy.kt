@@ -45,12 +45,13 @@ internal fun seekrPreviewsEligible(
     isTorrent: Boolean,
     apiKey: String,
     seekrServiceOff: Boolean = false,
+    nativePreviewsSupported: Boolean = true,
 ): Boolean {
     if (apiKey.isBlank() || seekrServiceOff) return false
     if (mode != DesktopSeekThumbnailMode.LocalAndSeekr && mode != DesktopSeekThumbnailMode.Streaming) return false
     if (bufferPreset == DesktopBufferPreset.Metered) return false
     // The torrent engine serves from 127.0.0.1, which would otherwise pass as user-controlled.
-    return isTorrent || !isUserControlledSource(sourceUrl)
+    return !nativePreviewsSupported || isTorrent || !isUserControlledSource(sourceUrl)
 }
 
 internal fun isUserControlledSource(sourceUrl: String): Boolean {

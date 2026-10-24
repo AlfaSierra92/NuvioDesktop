@@ -33,6 +33,7 @@ import kotlin.math.roundToInt
 import com.nuvio.app.core.ui.NuvioKeyCap
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
+import com.nuvio.app.isWindows
 import com.nuvio.app.features.player.PlayerShortcutAction
 import com.nuvio.app.features.player.AppShortcutAction
 import com.nuvio.app.features.player.AppShortcutRebindDialog
@@ -221,7 +222,8 @@ internal fun LazyListScope.keyboardShortcutsContent(isTablet: Boolean) {
         val escWindowedFirst by playerEscWindowedFirstState().collectAsState()
         var rebinding by remember { mutableStateOf<PlayerShortcutAction?>(null) }
         Column(verticalArrangement = Arrangement.spacedBy(NuvioTokens.Space.s18)) {
-            playerRowSections.forEachIndexed { sectionIndex, (title, specs) ->
+            playerRowSections.forEachIndexed { sectionIndex, (title, allSpecs) ->
+                val specs = allSpecs.filter { isWindows || it.action != PlayerShortcutAction.CycleSvp }
                 val sectionActions = specs.mapNotNull { it.action }
                 SettingsSection(
                     title = title,

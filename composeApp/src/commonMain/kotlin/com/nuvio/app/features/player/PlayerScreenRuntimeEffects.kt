@@ -66,6 +66,7 @@ import com.nuvio.app.features.streams.StreamLinkCacheRepository
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.hasLikelyExpiringPlaybackCredentials
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
+import com.nuvio.app.isWindows
 import com.nuvio.app.isDesktop
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.buildJsonObject
@@ -1241,6 +1242,7 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
     }
 
     val seekrEligible = seekrPreviewsEligible(
+        nativePreviewsSupported = !isDesktop || isWindows,
         mode = playerSettingsUiState.desktopSeekThumbnailMode,
         bufferPreset = playerSettingsUiState.desktopBufferPreset,
         sourceUrl = activeSourceUrl,

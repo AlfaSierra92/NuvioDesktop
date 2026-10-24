@@ -362,7 +362,7 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
           -o ${shellQuote(macosPlayerBridgeOutputFile.absolutePath)} \
           -I${shellQuote("$macosPlayerBridgeJavaHome/include")} \
           -I${shellQuote("$macosPlayerBridgeJavaHome/include/darwin")} \
-          -framework AppKit -framework WebKit -framework Metal -framework Security \
+          -framework CoreServices -framework CoreGraphics -framework AppKit -framework WebKit -framework Metal -framework Security \
           -framework IOKit -framework OpenGL -framework QuartzCore \
           ${'$'}(pkg-config --cflags --libs mpv)
         """.trimIndent(),
@@ -395,6 +395,8 @@ val macosPlayerBridgeCommand = if (missingMpvKitMacosFrameworks.isNotEmpty()) {
           $mpvKitGeneratedLibSearchArgs \
           -L"${'$'}{SWIFT_LIB}" \
           -L/usr/lib/swift \
+          -framework CoreServices \
+          -framework CoreGraphics \
           -framework AppKit \
           -framework WebKit \
           -framework Metal \
@@ -1946,6 +1948,13 @@ compose.desktop {
             modules("java.net.http", "jdk.httpserver", "jdk.management", "jdk.jfr")
             macOS {
                 bundleID = "com.nuvio.media.desktop"
+                entitlementsFile.set(project.file("src/desktopMain/resources/macos/nuvio.entitlements.plist"))
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>NSAppleEventsUsageDescription</key>
+                        <string>Nuvio requests shutdown when you enable automatic shutdown and its idle countdown finishes.</string>
+                    """.trimIndent()
+                }
                 iconFile.set(project.file("src/desktopMain/resources/icons/nuvio-app-icon.icns"))
                 if (macosSigningIdentity != null) {
                     signing {

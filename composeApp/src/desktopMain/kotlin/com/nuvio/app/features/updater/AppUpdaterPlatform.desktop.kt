@@ -1,5 +1,6 @@
 package com.nuvio.app.features.updater
 
+import com.nuvio.app.features.player.desktop.DesktopHostOs
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.build.AppVersionPolicy
 import com.nuvio.app.core.storage.DesktopStorage
@@ -36,10 +37,14 @@ actual object AppUpdaterPlatform {
     private val store = DesktopStorage.store(updaterPreferencesName)
 
     actual val isSupported: Boolean =
-        System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT).contains("win")
+        DesktopHostOs.current in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS)
 
     actual fun getSupportedAbis(): List<String> {
         val arch = System.getProperty("os.arch").orEmpty().lowercase(Locale.ROOT)
+        if (DesktopHostOs.current == DesktopHostOs.MACOS) {
+            return if (arch == "aarch64" || arch == "arm64") listOf("macos", "arm64", "aarch64")
+                else listOf("macos", "x64", "x86_64", "amd64")
+        }
         return when {
             arch == "aarch64" || arch == "arm64" -> listOf("arm64", "aarch64", "windows", "win")
             arch == "x86" || arch == "i386" || arch == "i686" -> listOf("x86", "i386", "windows", "win")
@@ -118,7 +123,8 @@ actual object AppUpdaterPlatform {
 
     // Default ON: only an explicit "off" opts back into manual extraction.
     actual fun isInPlaceUpdateEnabled(): Boolean =
-        !"off".equals(store.getString(inPlaceApplyKey), ignoreCase = true)
+        DesktopHostOs.current == DesktopHostOs.WINDOWS &&
+            !"off".equals(store.getString(inPlaceApplyKey), ignoreCase = true)
 
     actual fun setInPlaceUpdateEnabled(enabled: Boolean) {
         store.putString(inPlaceApplyKey, if (enabled) "on" else "off")
@@ -131,8 +137,9 @@ actual object AppUpdaterPlatform {
         onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            require(assetName.endsWith(".zip", ignoreCase = true)) {
-                "This portable build only supports ZIP update archives."
+            val macos = DesktopHostOs.current == DesktopHostOs.MACOS
+            require(assetName.endsWith(if (macos) ".dmg" else ".zip", ignoreCase = true)) {
+                "The update package is not supported on this operating system."
             }
             // Fail closed. The update is unpacked and run automatically, so an asset with no
             // published digest cannot be checked at all; GitHub has published one for every asset
@@ -140,7 +147,7 @@ actual object AppUpdaterPlatform {
             requireNotNull(expectedSha256?.takeIf { it.isNotBlank() }) {
                 "Update refused: GitHub published no SHA-256 checksum for this download, so it cannot be verified."
             }
-            tryDeltaDownload(assetUrl, onProgress)?.let { marker -> return@runCatching marker.absolutePath }
+            if (!macos) tryDeltaDownload(assetUrl, onProgress)?.let { marker -> return@runCatching marker.absolutePath }
 
             val safeName = assetName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val updateDirectory = portableUpdatesDirectory().apply { mkdirs() }
@@ -216,6 +223,13 @@ actual object AppUpdaterPlatform {
     actual fun installDownloadedApk(path: String): Result<UpdateInstallOutcome> = runCatching {
         val archive = File(path)
         check(archive.isFile) { "The downloaded update archive is missing." }
+
+        if (DesktopHostOs.current == DesktopHostOs.MACOS) {
+            require(archive.extension.equals("dmg", ignoreCase = true)) { "A macOS DMG installer is required." }
+            val process = ProcessBuilder("/usr/bin/open", archive.absolutePath).start()
+            check(process.waitFor() == 0) { "macOS could not open the downloaded installer." }
+            return@runCatching UpdateInstallOutcome.REVEALED
+        }
 
         if (archive.name == deltaMarkerName) {
             // Only the changed files were downloaded, so there is no archive to reveal: a delta is

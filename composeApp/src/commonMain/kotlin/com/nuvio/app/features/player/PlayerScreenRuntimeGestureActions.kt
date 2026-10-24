@@ -255,7 +255,8 @@ internal fun PlayerScreenRuntime.cycleResizeMode() {
 }
 
 /** Applies a specific resize mode (used by the context menu's Aspect ratio submenu). */
-internal fun PlayerScreenRuntime.setPlayerResizeMode(nextMode: PlayerResizeMode) {
+internal fun PlayerScreenRuntime.setPlayerResizeMode(requestedMode: PlayerResizeMode) {
+    val nextMode = requestedMode.supportedOnCurrentPlatform()
     resizeMode = nextMode
     lastSyncedSettingsResizeMode = nextMode
     PlayerSettingsRepository.setResizeMode(nextMode)

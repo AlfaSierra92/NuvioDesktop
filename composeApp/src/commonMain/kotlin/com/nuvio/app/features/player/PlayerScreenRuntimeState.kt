@@ -187,7 +187,7 @@ internal class PlayerScreenRuntime(
     var activeInitialProgressFraction by mutableStateOf(initialProgressFraction)
     var shouldPlay by mutableStateOf(true)
     var playbackEndExitRequested by mutableStateOf(false)
-    var resizeMode by mutableStateOf(playerSettingsUiState.resizeMode)
+    var resizeMode by mutableStateOf(playerSettingsUiState.resizeMode.supportedOnCurrentPlatform())
     var pictureInPictureActive by mutableStateOf(false)
     var layoutSize by mutableStateOf(IntSize.Zero)
     var playbackSnapshot by mutableStateOf(PlayerPlaybackSnapshot())

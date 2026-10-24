@@ -25,4 +25,23 @@ int main() {
     }
     assert(!macosHdrOutput(MacosHdrMode::Auto, true, 1.0).extendedRange);
     assert(macosHdrOutput(MacosHdrMode::Auto, true, 2.0).extendedRange);
+    // Panel changes must preserve colour encoding and survive repeated HDR/SDR transitions.
+    for (int i = 0; i < 20; ++i) {
+        for (auto mode : {MacosHdrMode::Auto, MacosHdrMode::Tonemap, MacosHdrMode::Passthrough}) {
+            for (bool sourceHdr : {false, true}) {
+                for (double headroom : {1.0, 4.0}) {
+                    const auto lcd = macosHdrOutput(mode, sourceHdr, headroom, false);
+                    const auto oled = macosHdrOutput(mode, sourceHdr, headroom, true);
+                    assert(std::strcmp(oled.targetContrast, "inf") == 0);
+                    assert(std::strcmp(lcd.targetContrast, lcd.extendedRange ? "auto" : "1000") == 0);
+                    assert(lcd.extendedRange == oled.extendedRange);
+                    assert(std::strcmp(lcd.primaries, oled.primaries) == 0);
+                    assert(std::strcmp(lcd.transfer, oled.transfer) == 0);
+                    const auto restored = macosHdrOutput(mode, sourceHdr, headroom, false);
+                    assert(std::strcmp(restored.targetContrast, lcd.targetContrast) == 0);
+                }
+            }
+        }
+    }
+
 }

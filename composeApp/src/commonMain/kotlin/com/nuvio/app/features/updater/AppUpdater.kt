@@ -400,25 +400,34 @@ private val utcInstantPattern = Regex("""^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(
 internal fun utcInstantOrNull(value: String?): String? =
     value?.trim()?.let { utcInstantPattern.matchEntire(it)?.groupValues?.get(1) }
 
-internal fun selectBestPortableUpdateAsset(assets: List<GitHubAssetDto>): GitHubAssetDto? {
-    val updateAssets = assets.filter { asset ->
-        asset.name.endsWith(".zip", ignoreCase = true) ||
-            asset.contentType.equals("application/zip", ignoreCase = true) ||
-            asset.contentType.equals("application/x-zip-compressed", ignoreCase = true)
+internal fun selectBestPortableUpdateAsset(
+    assets: List<GitHubAssetDto>,
+    supportedAbis: List<String> = AppUpdaterPlatform.getSupportedAbis(),
+): GitHubAssetDto? {
+    val macos = "macos" in supportedAbis
+    val arm = supportedAbis.any { it == "arm64" || it == "aarch64" }
+    fun architecture(name: String): String? = when {
+        Regex("(^|[^a-z0-9])(arm64|aarch64)([^a-z0-9]|$)").containsMatchIn(name) -> "arm64"
+        Regex("(^|[^a-z0-9])(x86_64|x64|amd64)([^a-z0-9]|$)").containsMatchIn(name) -> "x64"
+        Regex("(^|[^a-z0-9])(x86|i386|i686)([^a-z0-9]|$)").containsMatchIn(name) -> "x86"
+        else -> null
     }
-    if (updateAssets.isEmpty()) return null
-    if (updateAssets.size == 1) return updateAssets.first()
-
-    for (fragment in AppUpdaterPlatform.getSupportedAbis()) {
-        updateAssets.firstOrNull { asset ->
-            asset.name.contains(fragment, ignoreCase = true)
-        }?.let { return it }
-    }
-
-    return updateAssets.firstOrNull { asset ->
+    val wantedArch = if (arm) "arm64" else if (supportedAbis.any { it in listOf("x86", "i386", "i686") }) "x86" else "x64"
+    return assets.filter { asset ->
         val name = asset.name.lowercase()
-        name.contains("universal") || name.contains("all")
-    } ?: updateAssets.first()
+        val platformMatches = if (macos) name.endsWith(".dmg") else {
+            (name.endsWith(".zip") || asset.contentType in listOf("application/zip", "application/x-zip-compressed")) &&
+                listOf("macos", "darwin", "osx", "linux").none { it in name }
+        }
+        platformMatches && (architecture(name) == null || architecture(name) == wantedArch)
+    }.maxByOrNull { asset ->
+        val name = asset.name.lowercase()
+        when {
+            architecture(name) == wantedArch -> 3
+            "universal" in name || "all" in name -> 2
+            else -> 1
+        }
+    }
 }
 
 class AppUpdaterController internal constructor(
@@ -829,6 +838,8 @@ fun AppUpdaterHost(
                     Text(
                         text = when {
                             state.showUnknownSourcesDialog -> stringResource(Res.string.updates_message_allow_installs)
+                            state.downloadedApkPath?.endsWith(".dmg", ignoreCase = true) == true ->
+                                stringResource(Res.string.updates_message_macos_ready)
                             state.isDownloading -> stringResource(Res.string.updates_message_downloading)
                             state.downloadedApkPath != null &&
                                 state.update?.assetName?.endsWith(".zip", ignoreCase = true) == true ->
@@ -1004,6 +1015,8 @@ fun AppUpdaterHost(
                             Text(
                                 when {
                                     state.showUnknownSourcesDialog -> stringResource(Res.string.action_continue)
+                                    state.downloadedApkPath?.endsWith(".dmg", ignoreCase = true) == true ->
+                                        stringResource(Res.string.updates_open_macos_installer)
                                     state.downloadedApkPath != null &&
                                         state.update?.assetName?.endsWith(".zip", ignoreCase = true) == true ->
                                         stringResource(Res.string.updates_open_download)

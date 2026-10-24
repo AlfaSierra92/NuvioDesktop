@@ -17,20 +17,17 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
-import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal actual object DiscordRichPresencePlatform {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
-    private val unsupportedOsLogged = AtomicBoolean(false)
     private val unavailableLogged = AtomicBoolean(false)
     private var connection: DiscordIpcConnection? = null
     private var connectedClientId: String? = null
@@ -45,10 +42,11 @@ internal actual object DiscordRichPresencePlatform {
             mutex.withLock {
                 val payloadKey = activity?.toPayloadKey() ?: "clear"
                 if (payloadKey == lastPayloadKey) return@withLock
-                lastPayloadKey = payloadKey
 
                 if (activity == null) {
                     runCatching { connection?.setActivity(null) }
+                        .onSuccess { lastPayloadKey = payloadKey }
+                        .onFailure { closeConnection() }
                     println("[nuvio-discord] activity cleared")
                     return@withLock
                 }
@@ -102,7 +100,7 @@ internal actual object DiscordRichPresencePlatform {
                         "[nuvio-discord] activity updated title=\"${activity.title}\" " +
                             "subtitle=\"${activity.subtitle.orEmpty()}\" type=${activity.type} playing=${activity.isPlaying}",
                     )
-                }.onFailure { error ->
+                }.onSuccess { lastPayloadKey = payloadKey }.onFailure { error ->
                     closeConnection()
                     println("[nuvio-discord] activity update failed: ${error.message}")
                 }
@@ -129,7 +127,12 @@ internal actual object DiscordRichPresencePlatform {
 
         val pipePath = discordIpcPipeCandidates().firstNotNullOfOrNull { path ->
             runCatching {
-                DiscordIpcConnection(RandomAccessFile(path, "rw")).also { it.handshake(clientId) }
+                DiscordIpcConnection(openDiscordIpcTransport(path)).also { candidate ->
+                    try { candidate.handshake(clientId) } catch (error: Exception) {
+                        candidate.close()
+                        throw error
+                    }
+                }
             }.getOrNull()
         }
         if (pipePath == null) {
@@ -147,6 +150,7 @@ internal actual object DiscordRichPresencePlatform {
         runCatching { connection?.close() }
         connection = null
         connectedClientId = null
+        lastPayloadKey = null
     }
 
     /**
@@ -230,23 +234,13 @@ internal actual object DiscordRichPresencePlatform {
     private fun artworkHost(url: String): String =
         url.substringAfter("://").substringBefore('/').substringBefore('?')
 
-    private fun discordIpcPipeCandidates(): List<String> {
-        val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
-        return if (osName.contains("win")) {
-            // `\\.\pipe\`, not `\\?\pipe\`: since JDK 25 java.io normalises the `\\?\` prefix
-            // away, leaving the relative path `pipe\discord-ipc-N`, so every pipe looked absent.
-            (0..9).map { "\\\\.\\pipe\\discord-ipc-$it" }
-        } else {
-            if (unsupportedOsLogged.compareAndSet(false, true)) {
-                println("[nuvio-discord] Discord Rich Presence IPC is currently implemented for Windows desktop only.")
-            }
-            emptyList()
-        }
-    }
+    private fun discordIpcPipeCandidates(): List<String> = discordIpcCandidates(
+        System.getProperty("os.name").orEmpty(), System.getenv(), System.getProperty("java.io.tmpdir"),
+    )
 }
 
-private class DiscordIpcConnection(
-    private val file: RandomAccessFile,
+internal class DiscordIpcConnection(
+    private val transport: DiscordIpcTransport,
 ) {
     fun handshake(clientId: String) {
         writeFrame(
@@ -286,7 +280,7 @@ private class DiscordIpcConnection(
     }
 
     fun close() {
-        file.close()
+        transport.close()
     }
 
     private fun writeFrame(opcode: Int, payload: JsonObject) {
@@ -296,14 +290,13 @@ private class DiscordIpcConnection(
             .putInt(opcode)
             .putInt(payloadBytes.size)
             .array()
-        file.write(header)
-        file.write(payloadBytes)
+        transport.write(header + payloadBytes)
     }
 
     private fun readFramePayload(): JsonObject {
         while (true) {
             val header = ByteArray(DISCORD_FRAME_HEADER_BYTES)
-            file.readFully(header)
+            transport.readFully(header)
             val headerBuffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
             val opcode = headerBuffer.int
             val payloadLength = headerBuffer.int
@@ -311,7 +304,7 @@ private class DiscordIpcConnection(
                 throw IOException("Discord IPC returned an invalid frame length: $payloadLength")
             }
             val payloadBytes = ByteArray(payloadLength)
-            file.readFully(payloadBytes)
+            transport.readFully(payloadBytes)
             val payloadText = payloadBytes.toString(StandardCharsets.UTF_8)
             val payload = runCatching {
                 Json.parseToJsonElement(payloadText) as? JsonObject

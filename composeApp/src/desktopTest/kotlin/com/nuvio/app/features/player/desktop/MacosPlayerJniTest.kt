@@ -17,7 +17,7 @@ class MacosPlayerJniTest {
             "applyWindowChrome", "setBorderlessFullscreen", "setBorderlessFullscreenSuspended",
             "setCompactPlayerWindow", "beginCompactPlayerWindowMove", "beginCompactPlayerWindowResize",
             "updateCompactPlayerWindowInteraction", "endCompactPlayerWindowInteraction", "pollGamepads",
-            "systemIdleMs", "setWindowsDisplaySleepInhibited", "isForegroundProcess", "isWindowDisplayHdr",
+            "setWindowsDisplaySleepInhibited", "isWindowDisplayHdr",
             "decodeSpeechSpot", "speechSourceBytesPerSecond",
         )
         val tested = mutableSetOf<String>()
@@ -38,6 +38,11 @@ class MacosPlayerJniTest {
                 method.invoke(NativePlayerBridge, *arguments)
                 tested += method.name
             }
+        assertTrue("systemIdleMs" in tested)
+        assertTrue("isForegroundProcess" in tested)
+        assertTrue("requestMacosShutdown" in tested)
+        assertFalse(NativePlayerBridge.requestMacosShutdown(confirmed = false))
+        assertTrue(NativePlayerBridge.systemIdleMs() >= 0L)
         assertTrue("setMpvProperty" in tested)
         assertTrue("runJavaScript" in tested)
         assertEquals(100f, NativePlayerBridge.volume(0))

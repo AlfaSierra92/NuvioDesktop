@@ -130,7 +130,7 @@ internal fun PlayerScreenContent(args: PlayerScreenArgs) {
             )?.videos ?: emptyList()
         }
         if (runtime.lastSyncedSettingsResizeMode != playerSettingsUiState.resizeMode) {
-            runtime.resizeMode = playerSettingsUiState.resizeMode
+            runtime.resizeMode = playerSettingsUiState.resizeMode.supportedOnCurrentPlatform()
             runtime.lastSyncedSettingsResizeMode = playerSettingsUiState.resizeMode
         }
         runtime.resetIdentityStateIfNeeded()
