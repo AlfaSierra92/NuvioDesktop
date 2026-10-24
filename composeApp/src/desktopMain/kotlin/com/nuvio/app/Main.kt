@@ -1083,6 +1083,21 @@ fun main(args: Array<String>) {
                 }
             } else {
                 val smokeLastSecond = remember { java.util.concurrent.atomic.AtomicLong(-1L) }
+                LaunchedEffect(smokePlayerUrl) {
+                    if (System.getenv("NUVIO_DESKTOP_SMOKE_HDR_CYCLE") == "1") {
+                        delay(5_000L)
+                        repeat(3) {
+                            for (mode in listOf(
+                                com.nuvio.app.features.player.DesktopHdrMode.AlwaysTonemap,
+                                com.nuvio.app.features.player.DesktopHdrMode.AlwaysPassthrough,
+                                com.nuvio.app.features.player.DesktopHdrMode.Auto,
+                            )) {
+                                com.nuvio.app.features.player.PlayerSettingsRepository.setDesktopHdrMode(mode)
+                                delay(750L)
+                            }
+                        }
+                    }
+                }
                 PlatformPlayerSurface(
                     sourceUrl = smokePlayerUrl,
                     modifier = Modifier.fillMaxSize(),

@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--app", type=Path, default=Path(__file__).resolve().parents[1] /
                         "composeApp/build/compose/binaries/main-release/app/Nuvio HTPC.app")
     parser.add_argument("--seconds", type=int, default=30)
+    parser.add_argument("--hdr-cycle", action="store_true", help="Cycle HDR modes repeatedly and check the final output encoding")
+    parser.add_argument("--expect-hdr-source", action="store_true", help="Require HDR input detection during the mode cycle")
     args = parser.parse_args()
     executable = args.app / "Contents/MacOS/Nuvio HTPC"
     if not args.video.is_file() or not executable.is_file():
@@ -29,6 +31,8 @@ def main():
     env = os.environ.copy()
     env["JAVA_TOOL_OPTIONS"] = f"-Dnuvio.desktop.dataDir={root}/data -Dnuvio.dev.localNatives=false"
     env["NUVIO_DESKTOP_SMOKE_PLAYER_URL"] = str(args.video.resolve())
+    if args.hdr_cycle:
+        env["NUVIO_DESKTOP_SMOKE_HDR_CYCLE"] = "1"
     print(f"Test artifacts: {root}", flush=True)
     with (root / "console.log").open("w") as output:
         process = subprocess.Popen([str(executable.resolve())], env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -48,6 +52,19 @@ def main():
                 "no missing JNI methods": "UnsatisfiedLinkError" not in text,
                 "no player errors": "Error: (PlayerSmoke)" not in text,
             }
+            if args.hdr_cycle:
+                modes = re.findall(r"\(MacosHdr\) mode=(\w+) sourceHdr=(\d) output=(\w+) primaries=([\w.]+) transfer=([\w.]+) reason=mode-change", text)
+                tonemap = [row for row in modes if row[0] == "AlwaysTonemap"]
+                passthrough = [row for row in modes if row[0] == "AlwaysPassthrough"]
+                checks["three HDR mode cycles completed"] = len(tonemap) >= 3 and len(passthrough) >= 3 and modes[-1][0] == "Auto"
+                checks["tonemap restores SDR layer and pixels"] = bool(tonemap) and all(row[2:] == ("sdr", "bt.709", "srgb") for row in tonemap)
+                checks["Auto restores the same encoding as passthrough"] = bool(passthrough) and modes[-1][1:] == passthrough[-1][1:]
+                checks["layer encoding agrees with MPV"] = bool(modes) and all(
+                    row[2:] == (("hdr", "bt.2020", "pq") if row[2] == "hdr" else ("sdr", "bt.709", "srgb"))
+                    for row in modes
+                )
+                if args.expect_hdr_source:
+                    checks["HDR source detected throughout the cycle"] = bool(modes) and all(row[1] == "1" for row in modes if row[0] != "Auto" or row != modes[0])
             for name, passed in checks.items():
                 print(f"{'PASS' if passed else 'FAIL'}: {name}")
             if not all(checks.values()):

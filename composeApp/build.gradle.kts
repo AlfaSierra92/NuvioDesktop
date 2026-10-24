@@ -414,6 +414,7 @@ val buildMacosPlayerBridge = tasks.register<Exec>("buildMacosPlayerBridge") {
     notCompatibleWithConfigurationCache("Builds a host-local player bridge against MPVKit's macOS libmpv artifacts.")
     enabled = isMacHost
     inputs.file(macosPlayerBridgeSource)
+    inputs.file(layout.projectDirectory.file("src/desktopMain/native/macos/hdr_output.h"))
     if (mpvKitLibmpvStaticLib.exists()) {
         inputs.file(mpvKitLibmpvStaticLib)
     }
@@ -423,6 +424,18 @@ val buildMacosPlayerBridge = tasks.register<Exec>("buildMacosPlayerBridge") {
     inputs.files(mpvKitGeneratedPkgConfigDirs.mapNotNull { it.parentFile?.resolve("lib")?.takeIf(File::exists) })
     outputs.file(macosPlayerBridgeOutput)
     commandLine(macosPlayerBridgeCommand)
+}
+
+val testMacosHdrPolicy = tasks.register<Exec>("testMacosHdrPolicy") {
+    group = "verification"
+    description = "Checks HDR/SDR encoding agreement and repeated macOS mode transitions."
+    enabled = isMacHost
+    val source = project.file("src/desktopTest/native/macos/hdr_output_test.cpp")
+    val includeDir = project.file("src/desktopMain/native/macos")
+    val output = layout.buildDirectory.file("native/macos/hdr_output_test").get().asFile
+    dependsOn(buildMacosPlayerBridge)
+    inputs.files(source, includeDir.resolve("hdr_output.h"))
+    commandLine("/bin/sh", "-c", "xcrun clang++ -std=c++17 -I${shellQuote(includeDir.absolutePath)} ${shellQuote(source.absolutePath)} -o ${shellQuote(output.absolutePath)} && exec ${shellQuote(output.absolutePath)}")
 }
 
 val prepareMacosPlayerRuntime = tasks.register<Exec>("prepareMacosPlayerRuntime") {
@@ -1765,7 +1778,7 @@ kotlin {
 // opt-in: run them with `-Pnuvio.focusTests` before shipping input changes, and on CI where nobody
 // is at the keyboard.
 tasks.withType<Test>().configureEach {
-    if (isMacHost) dependsOn(prepareMacosPlayerRuntime)
+    if (isMacHost) dependsOn(prepareMacosPlayerRuntime, testMacosHdrPolicy)
     // DesktopStorage would otherwise read and write the real %LOCALAPPDATA%/NuvioHTPC, including
     // moving its settings into account folders the first time a test opens a store.
     val testDataDir = layout.buildDirectory.dir("test-data-dir").get().asFile

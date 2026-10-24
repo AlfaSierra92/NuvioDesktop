@@ -37,6 +37,8 @@ The macOS port includes:
 - Bundling and relocation of the player's non-system libraries, so Homebrew is
   required on the build machine rather than the machine running the packaged app.
 - Preservation of ONNX Runtime's macOS libraries in the packaged application.
+- Coordinated HDR mode changes: libmpv output and the macOS layer use matching
+  color encodings, and returning to Auto resets the managed HDR/SDR properties.
 
 Windows-specific features, including Direct3D, NVIDIA RTX Video, XInput polling,
 and the bundled Windows Nuvio Engine/SVP runtime, are not supplied by this port.
@@ -337,6 +339,9 @@ After building the release app, test real playback with a local video at least
 
 ```bash
 python3 scripts/smoke-macos-player.py /path/to/local/video.mp4
+
+# Also cycle Tonemap / Passthrough / Auto three times and verify output encoding
+python3 scripts/smoke-macos-player.py /path/to/local/video.mp4 --hdr-cycle
 ```
 
 This opens the packaged app for 30 seconds with temporary app data, then closes

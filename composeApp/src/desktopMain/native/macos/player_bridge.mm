@@ -16,6 +16,7 @@
 #include <dlfcn.h>
 #include <string>
 #include <vector>
+#include "hdr_output.h"
 
 @class PlayerMetalView;
 @class MpvWebPlayer;
@@ -77,6 +78,7 @@
 - (double)doubleProperty:(const char *)name fallback:(double)fallback;
 - (BOOL)flagProperty:(const char *)name fallback:(BOOL)fallback;
 - (void)setSubtitleAssStyleMode:(NSString *)mode scale:(double)scale;
+- (void)setHdrMode:(NSString *)mode;
 - (void)setPaused:(BOOL)paused;
 - (BOOL)isPaused;
 - (void)seekToMilliseconds:(long long)positionMs;
@@ -836,10 +838,10 @@ static void mpvRenderUpdateCallback(void *callbackContext) {
         return;
     }
 
-    setBoolWithSelector(self, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(self.window, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(self.window.contentView, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(_openGLLayer, @"setWantsExtendedDynamicRangeContent:", YES);
+    setBoolWithSelector(self, @"setWantsExtendedDynamicRangeContent:", _edrEnabled);
+    setBoolWithSelector(self.window, @"setWantsExtendedDynamicRangeContent:", _edrEnabled);
+    setBoolWithSelector(self.window.contentView, @"setWantsExtendedDynamicRangeContent:", _edrEnabled);
+    setBoolWithSelector(_openGLLayer, @"setWantsExtendedDynamicRangeContent:", _edrEnabled);
 
     CGColorSpaceRef colorSpace = _edrEnabled
         ? copyPqColorSpaceForPrimaries(_edrPrimaries)
@@ -865,10 +867,10 @@ static void mpvRenderUpdateCallback(void *callbackContext) {
     _edrMetadataMaxNits = enabled ? normalizedHdrMetadataMaxNits(targetPeakNits) : hdrMetadataMaxNits();
     _lastAppliedEdrLayerKey = nil;
 
-    setBoolWithSelector(self, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(self.window, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(self.window.contentView, @"setWantsExtendedDynamicRangeContent:", YES);
-    setBoolWithSelector(_openGLLayer, @"setWantsExtendedDynamicRangeContent:", YES);
+    setBoolWithSelector(self, @"setWantsExtendedDynamicRangeContent:", enabled);
+    setBoolWithSelector(self.window, @"setWantsExtendedDynamicRangeContent:", enabled);
+    setBoolWithSelector(self.window.contentView, @"setWantsExtendedDynamicRangeContent:", enabled);
+    setBoolWithSelector(_openGLLayer, @"setWantsExtendedDynamicRangeContent:", enabled);
 
     CGColorSpaceRef colorSpace = enabled
         ? copyPqColorSpaceForPrimaries(primaries)
@@ -1012,6 +1014,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     jobject _eventSink;
     jmethodID _eventMethod;
     NSString *_lastConfiguredHdrKey;
+    NSString *_requestedHdrMode;
     NSString *_lastResizeRefreshKey;
     dispatch_queue_t _mpvEventQueue;
     BOOL _didFocusControlsWebView;
@@ -1618,106 +1621,58 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     [self configureHdrForCurrentScreenWithReason:@"legacy" force:NO];
 }
 
+- (void)setHdrMode:(NSString *)mode {
+    if (![@[@"Auto", @"AlwaysTonemap", @"AlwaysPassthrough"] containsObject:mode]) return;
+    _requestedHdrMode = [mode copy];
+    [self configureHdrForCurrentScreenWithReason:@"mode-change" force:YES];
+}
+
 - (void)configureHdrForCurrentScreenWithReason:(NSString *)reason force:(BOOL)force {
-    if (!_mpv || !_videoView) {
-        return;
-    }
-    NSString *gamma = [[self stringProperty:"video-params/gamma" fallback:@""] lowercaseString];
-    NSString *primaries = [[self stringProperty:"video-params/primaries" fallback:@""] lowercaseString];
-    if (gamma.length == 0 && primaries.length == 0) {
-        return;
-    }
-
-    BOOL isPq = [gamma containsString:@"pq"]
-        || [gamma containsString:@"2084"]
-        || [gamma containsString:@"st2084"];
-    BOOL isHlg = [gamma containsString:@"hlg"];
-    double edrMax = [_videoView edrMax];
-    double screenPeak = [_videoView hdrTargetPeakNits];
-    BOOL hdrDetected = (isPq || isHlg) && edrMax > 1.0;
-    NSString *targetPrimaries = hdrDetected && primaries.length > 0 ? primaries : @"auto";
-    NSString *stateKey = [NSString stringWithFormat:
-        @"%@:%@:%@:%0.2f:%0.0f",
-        hdrDetected ? @"native-opengl-edr" : @"sdr",
-        gamma ?: @"",
-        targetPrimaries,
-        edrMax,
-        screenPeak
-    ];
-    if (!force && _lastConfiguredHdrKey && [_lastConfiguredHdrKey isEqualToString:stateKey]) {
-        return;
-    }
-    _lastConfiguredHdrKey = stateKey;
-
-    double targetPeakNits = normalizedHdrMetadataMaxNits(screenPeak);
-    [_videoView configureExtendedDynamicRange:hdrDetected primaries:targetPrimaries targetPeakNits:targetPeakNits];
-    NSString *targetTransfer = hdrDetected ? @"pq" : @"auto";
-    NSString *toneMapping = hdrDetected ? @"" : @"auto";
-    NSString *targetPeak = hdrDetected ? [NSString stringWithFormat:@"%.0f", targetPeakNits] : @"auto";
-    [self setStringProperty:"target-colorspace-hint" value:@"yes"];
-    [self setStringProperty:"target-colorspace-hint-mode" value:hdrDetected ? @"source" : @"target"];
-    [self setStringProperty:"target-colorspace-hint-strict" value:@"no"];
-    [self setStringProperty:"tone-mapping" value:toneMapping];
-    [self setStringProperty:"hdr-compute-peak" value:@"no"];
-    [self setStringProperty:"target-prim" value:targetPrimaries];
-    [self setStringProperty:"target-trc" value:targetTransfer];
-    [self setStringProperty:"target-peak" value:targetPeak];
+    [self applyHdrForPolledGamma:[self stringProperty:"video-params/gamma" fallback:@""]
+                      primaries:[self stringProperty:"video-params/primaries" fallback:@""]
+                         reason:reason force:force];
 }
 
 - (void)applyHdrForPolledGamma:(NSString *)gamma primaries:(NSString *)primaries reason:(NSString *)reason force:(BOOL)force {
-    if (!_mpv || !_videoView) {
-        return;
-    }
+    if (!_mpv || !_videoView) return;
     NSString *normalizedGamma = [[gamma ?: @"" lowercaseString] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *normalizedPrimaries = [[primaries ?: @"" lowercaseString] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (normalizedGamma.length == 0 && normalizedPrimaries.length == 0) {
-        return;
-    }
+    const bool sourceHdr = [normalizedGamma containsString:@"pq"]
+        || [normalizedGamma containsString:@"2084"] || [normalizedGamma containsString:@"hlg"];
+    NSString *modeName = _requestedHdrMode ?: @"Auto";
+    MacosHdrMode mode = [modeName isEqualToString:@"AlwaysTonemap"] ? MacosHdrMode::Tonemap
+        : [modeName isEqualToString:@"AlwaysPassthrough"] ? MacosHdrMode::Passthrough : MacosHdrMode::Auto;
+    const double headroom = [_videoView edrMax];
+    const double peak = normalizedHdrMetadataMaxNits([_videoView hdrTargetPeakNits]);
+    const MacosHdrOutput output = macosHdrOutput(mode, sourceHdr, headroom);
+    NSString *stateKey = [NSString stringWithFormat:@"%@:%@:%@:%0.2f:%0.0f", modeName,
+        normalizedGamma, primaries ?: @"", headroom, peak];
+    if (!force && [_lastConfiguredHdrKey isEqualToString:stateKey]) return;
 
-    BOOL isPq = [normalizedGamma containsString:@"pq"]
-        || [normalizedGamma containsString:@"2084"]
-        || [normalizedGamma containsString:@"st2084"];
-    BOOL isHlg = [normalizedGamma containsString:@"hlg"];
-    double edrMax = [_videoView edrMax];
-    double screenPeak = [_videoView hdrTargetPeakNits];
-    BOOL hdrDetected = (isPq || isHlg) && edrMax > 1.0;
-    NSString *targetPrimaries = hdrDetected && normalizedPrimaries.length > 0 ? normalizedPrimaries : @"auto";
-    NSString *stateKey = [NSString stringWithFormat:
-        @"%@:%@:%@:%0.2f:%0.0f",
-        hdrDetected ? @"native-opengl-edr" : @"sdr",
-        normalizedGamma ?: @"",
-        targetPrimaries,
-        edrMax,
-        screenPeak
-    ];
-    if (!force && _lastConfiguredHdrKey && [_lastConfiguredHdrKey isEqualToString:stateKey]) {
-        return;
-    }
+    // One main-thread owner: never queue an older automatic HDR write after a newer mode.
+    // Reset all managed properties on every transition, including the return to Auto.
+    mpv_set_property_string(_mpv, "target-colorspace-hint", "no");
+    mpv_set_property_string(_mpv, "target-colorspace-hint-mode", "target");
+    mpv_set_property_string(_mpv, "target-colorspace-hint-strict", "no");
+    mpv_set_property_string(_mpv, "tone-mapping", "auto");
+    mpv_set_property_string(_mpv, "hdr-compute-peak", "no");
+    mpv_set_property_string(_mpv, "target-prim", output.primaries);
+    mpv_set_property_string(_mpv, "target-trc", output.transfer);
+    NSString *targetPeak = output.extendedRange ? [NSString stringWithFormat:@"%.0f", peak] : @"203";
+    mpv_set_property_string(_mpv, "target-peak", targetPeak.UTF8String);
+    mpv_set_property_string(_mpv, "target-contrast", output.extendedRange ? "auto" : "1000");
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [_videoView configureExtendedDynamicRange:output.extendedRange
+                                   primaries:[NSString stringWithUTF8String:output.primaries]
+                              targetPeakNits:peak];
+    [CATransaction commit];
     _lastConfiguredHdrKey = stateKey;
-
-    double targetPeakNits = normalizedHdrMetadataMaxNits(screenPeak);
-    [_videoView configureExtendedDynamicRange:hdrDetected primaries:targetPrimaries targetPeakNits:targetPeakNits];
-
-    NSString *targetTransfer = hdrDetected ? @"pq" : @"auto";
-    NSString *toneMapping = hdrDetected ? @"" : @"auto";
-    NSString *targetPeak = hdrDetected ? [NSString stringWithFormat:@"%.0f", targetPeakNits] : @"auto";
-    mpv_handle *mpv = _mpv;
-    dispatch_queue_t queue = _mpvEventQueue;
-    if (queue) {
-        dispatch_async(queue, ^{
-            if (self->_mpv != mpv) {
-                return;
-            }
-            mpv_set_property_string(mpv, "target-colorspace-hint", "yes");
-            mpv_set_property_string(mpv, "target-colorspace-hint-mode", hdrDetected ? "source" : "target");
-            mpv_set_property_string(mpv, "target-colorspace-hint-strict", "no");
-            mpv_set_property_string(mpv, "tone-mapping", toneMapping.UTF8String);
-            mpv_set_property_string(mpv, "hdr-compute-peak", "no");
-            mpv_set_property_string(mpv, "target-prim", targetPrimaries.UTF8String);
-            mpv_set_property_string(mpv, "target-trc", targetTransfer.UTF8String);
-            mpv_set_property_string(mpv, "target-peak", targetPeak.UTF8String);
-        });
-    }
+    [self forceVideoRedraw];
+    NSString *actualPrimaries = [self stringProperty:"target-prim" fallback:@"unknown"];
+    NSString *actualTransfer = [self stringProperty:"target-trc" fallback:@"unknown"];
+    fprintf(stderr, "Info: (MacosHdr) mode=%s sourceHdr=%d output=%s primaries=%s transfer=%s reason=%s\n",
+        modeName.UTF8String, sourceHdr, output.extendedRange ? "hdr" : "sdr",
+        actualPrimaries.UTF8String, actualTransfer.UTF8String, reason.UTF8String);
 }
 
 - (JNIEnv *)jniEnvDidAttach:(BOOL *)didAttach {
@@ -1822,6 +1777,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     if (_mpvEventQueue) {
         dispatch_sync(_mpvEventQueue, ^{});
     }
+    [_videoView configureExtendedDynamicRange:NO primaries:@"bt.709" targetPeakNits:203.0];
     [_videoView destroyMpvRenderContext];
     if (_mpv) {
         mpv_terminate_destroy(_mpv);
@@ -2953,9 +2909,13 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setMpvProperty(
     if (!handle) return;
     std::string keyText = jstringToString(env, key);
     std::string valueText = jstringToString(env, value);
-    // Internal Windows/SVP directives are not libmpv properties.
-    if (keyText.empty() || keyText[0] == '@') return;
     MpvWebPlayer *player = (__bridge MpvWebPlayer *)(void *)(intptr_t)handle;
+    if (keyText == "@nuvio-hdr-mode") {
+        runOnMainAsync(^{ [player setHdrMode:[NSString stringWithUTF8String:valueText.c_str()]]; });
+        return;
+    }
+    // Other internal Windows/SVP directives are not libmpv properties.
+    if (keyText.empty() || keyText[0] == '@') return;
     runOnMainAsync(^{
         [player setStringProperty:keyText.c_str() value:[NSString stringWithUTF8String:valueText.c_str()]];
     });

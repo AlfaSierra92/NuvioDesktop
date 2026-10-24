@@ -1274,7 +1274,10 @@ private fun applyDesktopVideoProfile(
 ) {
     val displayPanel = PlayerSettingsRepository.uiState.value
         .desktopMpvPropertyOverrides[DESKTOP_DISPLAY_PANEL_OVERRIDE_KEY]
-    when (hdrMode) {
+    if (DesktopHostOs.current == DesktopHostOs.MACOS) {
+        // Native code owns both libmpv's encoding and the Core Animation layer.
+        controller.setMpvProperty("@nuvio-hdr-mode", hdrMode.name)
+    } else when (hdrMode) {
         DesktopHdrMode.Auto -> {
             controller.setMpvProperty("target-colorspace-hint", "auto")
             controller.setMpvProperty("target-colorspace-hint-mode", "target")
