@@ -83,7 +83,7 @@ internal actual object FolderScanner {
                 // directories may provide fallback season context; direct children stay absolute.
                 val seasonFolderName = file.parentFile
                     ?.takeUnless { parent ->
-                        parent.absolutePath.equals(showDirectory.absolutePath, ignoreCase = true)
+                        localLibraryPathsEqual(parent.absolutePath, showDirectory.absolutePath)
                     }
                     ?.name
                 val episode = FilenameParser.parseEpisode(file.name, seasonFolderName, isAnime = folder.isAnime)

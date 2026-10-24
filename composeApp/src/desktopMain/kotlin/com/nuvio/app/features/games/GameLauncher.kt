@@ -22,9 +22,12 @@ object GameLauncher {
             }
             val chooser = JFileChooser(initialDirectory).apply {
                 dialogTitle = "Choose game executable or shortcut"
-                fileSelectionMode = JFileChooser.FILES_ONLY
+                fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
                 isMultiSelectionEnabled = false
-                fileFilter = FileNameExtensionFilter("Applications and shortcuts (*.exe, *.lnk, *.url)", "exe", "lnk", "url")
+                if (System.getProperty("os.name").startsWith("Windows")) {
+                    fileSelectionMode = JFileChooser.FILES_ONLY
+                    fileFilter = FileNameExtensionFilter("Applications and shortcuts (*.exe, *.lnk, *.url)", "exe", "lnk", "url")
+                }
                 if (initialFile?.isFile == true) selectedFile = initialFile
             }
             if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
@@ -83,12 +86,15 @@ object GameLauncher {
             is GameLaunchTarget.Executable -> resolved
         }
         val executable = File(target.path)
-        require(executable.isFile) {
+        val bundle = executable.isMacGameBundle()
+        require(executable.isFile || bundle) {
             if (isShortcutFile(configuredPath)) "Shortcut target not found: ${target.path}"
             else "Executable not found: ${target.path}"
         }
         val command = buildList {
-            add(executable.absolutePath)
+            if (bundle) {
+                addAll(listOf("/usr/bin/open", "-W", "-n", "-a", executable.absolutePath, "--args"))
+            } else add(executable.absolutePath)
             addAll(target.arguments)
             addAll(game.arguments)
         }
@@ -147,6 +153,14 @@ object GameLauncher {
             .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
     }
+}
+
+internal fun File.isMacGameBundle(): Boolean = isDirectory && extension.equals("app", ignoreCase = true) &&
+    File(this, "Contents/Info.plist").isFile
+
+internal fun gamePathIdentity(path: String): String {
+    val canonical = runCatching { File(path).canonicalPath }.getOrDefault(path)
+    return if (System.getProperty("os.name").startsWith("Windows")) canonical.lowercase() else canonical
 }
 
 /**

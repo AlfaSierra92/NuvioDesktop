@@ -1242,7 +1242,7 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
     }
 
     val seekrEligible = seekrPreviewsEligible(
-        nativePreviewsSupported = !isDesktop || isWindows,
+        nativePreviewsSupported = true,
         mode = playerSettingsUiState.desktopSeekThumbnailMode,
         bufferPreset = playerSettingsUiState.desktopBufferPreset,
         sourceUrl = activeSourceUrl,

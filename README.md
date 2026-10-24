@@ -39,9 +39,17 @@ The macOS port includes:
 - Preservation of ONNX Runtime's macOS libraries in the packaged application.
 - Coordinated HDR mode changes: libmpv output and the macOS layer use matching
   color encodings, and returning to Auto resets the managed HDR/SDR properties.
+- Local seek thumbnails, audio-referenced subtitle sync, AutoCrop and macOS Now Playing.
+- GameController input, compact PiP window interactions, external mpv/VLC discovery
+  and mpv progress tracking over Unix sockets.
+- Native game bundles and Unix executables in Game Mode, native ffmpeg/ffprobe
+  discovery for casting, and `nuvio://` links registered in the app bundle.
+- The patched QuickJS runtime and optional native Nuvio Engine build for macOS.
 
-Windows-specific features, including Direct3D, NVIDIA RTX Video, XInput polling,
-and the bundled Windows Nuvio Engine/SVP runtime, are not supplied by this port.
+Direct3D, NVIDIA RTX Video and XInput remain Windows integrations; macOS uses its
+own rendering and GameController backends. SVP on macOS requires an external
+VapourSynth/SVP installation and a compatible libmpv build; its proprietary
+runtime is not bundled.
 Network streams, large home catalogs, and all playback options have not been
 exhaustively tested. See [Build on macOS](#build-on-macos) for setup and validation.
 
@@ -333,6 +341,31 @@ Copied player libraries receive ad-hoc signatures after their loader paths are
 rewritten, as required for loading them on Apple Silicon.
 
 ### macOS validation
+
+The native feature harness generates a local video with black bars and audio,
+opens a temporary test window, and checks PiP style restoration, seek thumbnails,
+audio samples, AutoCrop and Now Playing cleanup:
+
+```bash
+sh scripts/test-macos-player-features.sh
+```
+
+External mpv tracking, executable discovery, Game Mode and path handling also have
+desktop regression tests. Gamepad polling is implemented with GameController;
+testing physical controllers and receiver-specific behaviour still requires the
+corresponding hardware.
+
+For the optional native P2P backend, see
+[the engine build instructions](composeApp/src/desktopMain/native/nuvio-engine/README.md).
+Its dependencies are relocated into a separate `Contents/app/native/engine`
+directory. Without an engine build, TorrServer remains the fallback.
+
+For SVP, follow the [official macOS setup](https://www.svp-team.com/docs/mac/).
+Keep SVP Manager running. Nuvio detects available plugin/core locations, or accepts
+`-Dnuvio.svp.pluginDir=/path/to/plugins` (`NUVIO_SVP_PLUGIN_DIR`) and
+`-Dnuvio.svp.script=/path/to/configured-script.vpy`. The SVP controls appear only
+when the required external runtime is detected. No SVP plugin is installed or
+downloaded automatically.
 
 Run the JNI, bundle-layout, and native-scroll regression tests:
 

@@ -17,6 +17,19 @@ import java.util.concurrent.TimeUnit
 object DesktopUrlScheme {
 
     fun registerInBackground() {
+        if (System.getProperty("os.name").contains("mac", ignoreCase = true)) {
+            runCatching {
+                val desktop = java.awt.Desktop.getDesktop()
+                if (desktop.isSupported(java.awt.Desktop.Action.APP_OPEN_URI)) {
+                    desktop.setOpenURIHandler { event ->
+                        dispatchDesktopOpenUri(event.uri,
+                            queue = { com.nuvio.app.core.deeplink.AppDeepLinkRepository.handleUrl(it) },
+                            activate = { DesktopSingleInstance.onActivate?.invoke() })
+                    }
+                }
+            }.onFailure { System.err.println("Warn: (UrlScheme) could not install macOS URL handler: $it") }
+            return
+        }
         if (!System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) return
         val exe = System.getProperty("jpackage.app-path")?.takeIf { it.isNotBlank() } ?: return
         Thread({
@@ -51,4 +64,11 @@ object DesktopUrlScheme {
             Files.deleteIfExists(file)
         }
     }
+}
+
+internal fun dispatchDesktopOpenUri(uri: java.net.URI, queue: (String) -> Unit, activate: () -> Unit): Boolean {
+    if (!uri.scheme.equals("nuvio", ignoreCase = true)) return false
+    queue(uri.toString())
+    activate()
+    return true
 }

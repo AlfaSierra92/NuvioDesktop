@@ -3,15 +3,15 @@ package com.nuvio.engine.internal
 import java.io.File
 
 /**
- * Locates and loads nuvio_engine.dll. Resolution mirrors player_bridge.dll's: the packaged app
- * image (the directory above `java.home`) first, then the Gradle build output for `gradlew run`.
+ * Locates and loads the engine DLL/dylib. The packaged runtime is preferred; on macOS its
+ * dependencies live in app/native/engine, isolated from the player runtime.
  * An explicit `-Dnuvio.engine.library=<abs path>` / `NUVIO_ENGINE_LIBRARY` wins over both.
  *
  * [isAvailable] is the cheap pre-check the P2P engine uses to decide between this backend and
  * TorrServer without triggering a load; [load] is what [NativeBridge]'s initializer calls.
  */
 internal object NuvioEngineLibrary {
-    const val LIBRARY_FILE_NAME = "nuvio_engine.dll"
+    val LIBRARY_FILE_NAME: String get() = if (System.getProperty("os.name").contains("mac", ignoreCase = true)) "libnuvio_engine.dylib" else "nuvio_engine.dll"
 
     @Volatile
     private var loadedFrom: File? = null
@@ -24,15 +24,15 @@ internal object NuvioEngineLibrary {
     }
 
     val isAvailable: Boolean
-        get() = System.getProperty("os.name").orEmpty().lowercase().contains("win") && resolve() != null
+        get() = resolve() != null
 
     @Synchronized
     fun load() {
         if (loadedFrom != null) return
         val library = resolve()
             ?: throw UnsatisfiedLinkError(
-                "$LIBRARY_FILE_NAME was not found beside the app runtime or under build/native/windows; " +
-                    "run :composeApp:buildWindowsNuvioEngine or pass -Dnuvio.engine.library=<path>",
+                "$LIBRARY_FILE_NAME was not found in the packaged or development native runtime; " +
+                    "build the native engine for this OS or pass -Dnuvio.engine.library=<path>",
             )
         System.load(library.absolutePath)
         loadedFrom = library
@@ -44,16 +44,19 @@ internal object NuvioEngineLibrary {
             ?.let(::File)
 
     private fun candidates(): List<File> {
-        val packaged = System.getProperty("java.home")
-            ?.takeIf { it.isNotBlank() }
-            ?.let(::File)
-            ?.parentFile
-            ?.resolve(LIBRARY_FILE_NAME)
+        val macos = System.getProperty("os.name").contains("mac", ignoreCase = true)
+        val platform = if (macos) "macos" else "windows"
+        val home = System.getProperty("java.home")?.let(::File)
+        val directory = if (macos) home?.parentFile?.parentFile?.parentFile?.resolve("app/native/engine") else home?.parentFile
+        val packaged = directory?.resolve(LIBRARY_FILE_NAME)
+
         if (!com.nuvio.app.core.build.DesktopDevRun.allowsLocalNativeBuilds) return listOfNotNull(packaged)
         return listOfNotNull(
             packaged,
-            File("composeApp/build/native/windows/$LIBRARY_FILE_NAME"),
-            File("build/native/windows/$LIBRARY_FILE_NAME"),
+            File("composeApp/build/native/macos-engine-runtime/$LIBRARY_FILE_NAME"),
+            File("build/native/macos-engine-runtime/$LIBRARY_FILE_NAME"),
+            File("composeApp/build/native/$platform/$LIBRARY_FILE_NAME"),
+            File("build/native/$platform/$LIBRARY_FILE_NAME"),
         )
     }
 }

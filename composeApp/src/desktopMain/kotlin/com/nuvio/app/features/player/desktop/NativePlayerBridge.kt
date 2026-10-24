@@ -153,8 +153,8 @@ internal object NativePlayerBridge {
     external fun forceVideoRedraw(handle: Long)
 
     /**
-     * Polls the XInput controller slots selected by [slotMask] (bit N = slot N) and returns a
-     * bitmask of the slots that answered. [out] must hold at least `4 * 8` ints and is filled per
+     * Polls Windows XInput/HID or macOS GameController slots selected by [slotMask] (bit N = slot N) and returns a
+     * bitmask of the slots that answered. [out] must hold at least `8 * 8` ints and is filled per
      * slot with `[buttons, leftTrigger, rightTrigger, thumbLX, thumbLY, thumbRX, thumbRY,
      * packetNumber]`; untouched slots keep their previous contents, so read only the slots whose
      * bit is set in the return value.

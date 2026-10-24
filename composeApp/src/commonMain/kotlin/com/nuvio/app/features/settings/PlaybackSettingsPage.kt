@@ -137,6 +137,7 @@ import com.nuvio.app.features.streams.StreamPrefetchScope
 import com.nuvio.app.isDesktop
 import com.nuvio.app.isIos
 import com.nuvio.app.isWindows
+import com.nuvio.app.desktopSvpSupported
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.StringResource
@@ -1371,21 +1372,9 @@ private fun PlaybackSettingsSection(
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsChoiceRow(
                             title = stringResource(Res.string.settings_playback_desktop_seek_thumbnails),
-                            description = if (isDesktop && !isWindows) {
-                                stringResource(Res.string.settings_playback_seekr_only_description)
-                            } else autoPlayPlayerSettings.desktopSeekThumbnailMode.description,
-                            options = if (isDesktop && !isWindows) {
-                                listOf(
-                                    SettingsChoiceOption(DesktopSeekThumbnailMode.Off, DesktopSeekThumbnailMode.Off.label),
-                                    SettingsChoiceOption(DesktopSeekThumbnailMode.LocalAndSeekr, "Seekr"),
-                                )
-                            } else DesktopSeekThumbnailMode.entries.map { SettingsChoiceOption(it, it.label) },
-                            selectedValue = if (isDesktop && !isWindows) {
-                                when (autoPlayPlayerSettings.desktopSeekThumbnailMode) {
-                                    DesktopSeekThumbnailMode.Off, DesktopSeekThumbnailMode.Local -> DesktopSeekThumbnailMode.Off
-                                    else -> DesktopSeekThumbnailMode.LocalAndSeekr
-                                }
-                            } else autoPlayPlayerSettings.desktopSeekThumbnailMode,
+                            description = autoPlayPlayerSettings.desktopSeekThumbnailMode.description,
+                            options = DesktopSeekThumbnailMode.entries.map { SettingsChoiceOption(it, it.label) },
+                            selectedValue = autoPlayPlayerSettings.desktopSeekThumbnailMode,
                             isTablet = isTablet,
                             modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.SeekThumbnails),
                             onSelected = PlayerSettingsRepository::setDesktopSeekThumbnailMode,
@@ -1504,7 +1493,7 @@ private fun PlaybackSettingsSection(
                                 modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.AnimeSkipUltraHd),
                                 onCheckedChange = PlayerSettingsRepository::setDesktopAnimeSkipUltraHdEnabled,
                             )
-                            if (isWindows) {
+                            if (desktopSvpSupported) {
                                 SettingsGroupDivider(isTablet = isTablet)
                                 SettingsSwitchRow(
                                     title = stringResource(Res.string.settings_playback_desktop_anime_svp),
@@ -4928,7 +4917,7 @@ private fun HiddenHudButtonsRow(hidden: Set<String>, isTablet: Boolean) {
         SettingsChoiceOption("keyboardCycleHdrMode", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_hdr_mode)),
         SettingsChoiceOption("keyboardCycleColorProfile", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_color_profile)),
         SettingsChoiceOption("keyboardCycleAnimeMode", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_mode)),
-        if (isWindows) SettingsChoiceOption("keyboardCycleAnimeSvp", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_svp)) else null,
+        if (desktopSvpSupported) SettingsChoiceOption("keyboardCycleAnimeSvp", stringResource(Res.string.settings_playback_hud_button_keyboard_cycle_anime_svp)) else null,
         SettingsChoiceOption("sources", stringResource(Res.string.settings_playback_hud_button_sources)),
         SettingsChoiceOption("episodes", stringResource(Res.string.settings_playback_hud_button_episodes)),
         SettingsChoiceOption("submitIntro", stringResource(Res.string.settings_playback_hud_button_submit_intro)),

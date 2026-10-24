@@ -303,7 +303,8 @@ class GameLaunchTargetTest {
         fun u16(value: Int) = items.write(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(value.toShort()).array())
         fun u32(value: Int) = items.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array())
 
-        val segments = path.split('\\').filter(String::isNotEmpty)
+        val segments = if (path.startsWith('/')) listOf("/") + path.split('/').filter(String::isNotEmpty)
+            else path.split('\\').filter(String::isNotEmpty)
         val drive = segments.first() + "\\"
         u16(2 + 1 + drive.length + 1 + 20)
         items.write(0x2F)

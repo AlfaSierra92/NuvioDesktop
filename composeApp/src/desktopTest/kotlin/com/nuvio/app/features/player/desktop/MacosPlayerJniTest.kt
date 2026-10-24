@@ -15,10 +15,9 @@ class MacosPlayerJniTest {
         val windowsOnly = setOf(
             "initializeAppIdentity", "beginVideoProfile", "endVideoProfile", "completeSvpStartupProfile",
             "applyWindowChrome", "setBorderlessFullscreen", "setBorderlessFullscreenSuspended",
-            "setCompactPlayerWindow", "beginCompactPlayerWindowMove", "beginCompactPlayerWindowResize",
-            "updateCompactPlayerWindowInteraction", "endCompactPlayerWindowInteraction", "pollGamepads",
+            "beginCompactPlayerWindowMove", "beginCompactPlayerWindowResize",
+            "updateCompactPlayerWindowInteraction", "endCompactPlayerWindowInteraction",
             "setWindowsDisplaySleepInhibited", "isWindowDisplayHdr",
-            "decodeSpeechSpot", "speechSourceBytesPerSecond",
         )
         val tested = mutableSetOf<String>()
         NativePlayerBridge::class.java.declaredMethods
@@ -31,6 +30,7 @@ class MacosPlayerJniTest {
                         java.lang.Float.TYPE -> 0f
                         java.lang.Double.TYPE -> 0.0
                         java.lang.Boolean.TYPE -> false
+                        IntArray::class.java -> IntArray(0)
                         String::class.java -> ""
                         else -> error("Add a JNI test argument for $type in ${method.name}")
                     }

@@ -414,20 +414,26 @@ data class LocalLibraryUiState(
 
 /** The path with its last segment dropped, or "" when there is nothing above it. */
 private fun String.parentDirectoryPath(): String {
-    val cut = trimEnd('/', '\\').lastIndexOfAny(charArrayOf('/', '\\'))
+    val cut = if (isWindowsLibraryPath()) trimEnd('/', '\\').lastIndexOfAny(charArrayOf('/', '\\'))
+        else trimEnd('/').lastIndexOf('/')
     return if (cut <= 0) "" else substring(0, cut)
 }
 
-/**
- * The deepest directory shared by two paths. Segments compare case-insensitively because this is a
- * Windows-only build, where the same folder is routinely spelled with different casing.
- */
+/** Windows syntax keeps Windows comparison rules even in imported libraries on another OS. */
+internal fun String.isWindowsLibraryPath(): Boolean =
+    Regex("^[A-Za-z]:[/\\\\]").containsMatchIn(this) || startsWith("\\\\")
+
+internal expect fun localLibraryPathsEqual(first: String, second: String): Boolean
+
 private fun commonDirectoryPath(first: String, second: String): String {
-    val separator = if ('\\' in first) "\\" else "/"
-    val shared = first.split('/', '\\')
-        .zip(second.split('/', '\\'))
-        .takeWhile { (a, b) -> a.equals(b, ignoreCase = true) }
-        .map { it.first }
+    val windows = first.isWindowsLibraryPath()
+    val separator = if (windows && '\\' in first) "\\" else "/"
+    val firstParts = if (windows) first.split('/', '\\') else first.split('/')
+    val secondParts = if (windows) second.split('/', '\\') else second.split('/')
+    val shared = firstParts.zip(secondParts).withIndex().takeWhile { (index, pair) ->
+        if (windows) pair.first.equals(pair.second, ignoreCase = true)
+        else localLibraryPathsEqual(firstParts.take(index + 1).joinToString("/"), secondParts.take(index + 1).joinToString("/"))
+    }.map { it.value.first }
     return shared.joinToString(separator)
 }
 
@@ -443,17 +449,21 @@ const val LOCAL_LIBRARY_STREAM_NAME = "Local File"
 const val LOCAL_LIBRARY_PROVIDER_NAME = "Local Library"
 
 /**
- * Whether [this] file path sits inside [root], comparing case-insensitively and treating '/' and
- * backslash as the same separator (Windows-only build; a folder is spelled either way).
+ * Whether [this] file path sits inside [root]. Windows syntax uses Windows separators and case
+ * rules; POSIX paths consult filesystem identity when their spelling differs.
  * A path equal to the root is not "inside" it — a library root is a directory, never a media file.
  */
 internal fun String.isInsideDirectory(root: String): Boolean {
-    val normalizedRoot = root.trim().trimEnd('/', '\\').replace('\\', '/')
+    val windows = root.isWindowsLibraryPath()
+    fun normalized(value: String) = if (windows) value.trim().replace('\\', '/').trimEnd('/') else value.trim().trimEnd('/')
+    val normalizedRoot = normalized(root)
     if (normalizedRoot.isBlank()) return false
-    val normalizedPath = trim().replace('\\', '/').trimEnd('/')
+    val normalizedPath = normalized(this)
     if (normalizedPath.length <= normalizedRoot.length) return false
     if (normalizedPath[normalizedRoot.length] != '/') return false
-    return normalizedPath.regionMatches(0, normalizedRoot, 0, normalizedRoot.length, ignoreCase = true)
+    val prefix = normalizedPath.take(normalizedRoot.length)
+    return if (windows) prefix.equals(normalizedRoot, ignoreCase = true)
+    else localLibraryPathsEqual(prefix, normalizedRoot)
 }
 
 fun String.isLocalLibraryId(): Boolean = startsWith(LOCAL_ID_PREFIX)

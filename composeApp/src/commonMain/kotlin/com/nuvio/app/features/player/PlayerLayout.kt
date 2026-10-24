@@ -131,7 +131,7 @@ internal fun PlayerResizeMode.next(): PlayerResizeMode =
     when (this) {
         PlayerResizeMode.Fit -> PlayerResizeMode.Fill
         PlayerResizeMode.Fill -> PlayerResizeMode.Zoom
-        PlayerResizeMode.Zoom -> if (isDesktop && !isWindows) PlayerResizeMode.Fit else PlayerResizeMode.AutoCrop
+        PlayerResizeMode.Zoom -> PlayerResizeMode.AutoCrop
         PlayerResizeMode.AutoCrop -> PlayerResizeMode.Fit
     }
 
@@ -198,6 +198,6 @@ internal fun normalizePlaybackSpeedToggleRange(low: Float, high: Float): Pair<Fl
     }
 }
 
-/** Auto crop currently depends on the Windows native frame probe. */
+/** Both desktop player backends provide the native frame probe. */
 internal fun PlayerResizeMode.supportedOnCurrentPlatform(): PlayerResizeMode =
-    if (this == PlayerResizeMode.AutoCrop && isDesktop && !isWindows) PlayerResizeMode.Fit else this
+    this

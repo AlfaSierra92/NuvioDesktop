@@ -31,6 +31,7 @@ def load_config():
         'max_cache_size': 2048,   # MB default for 16GB machines
         'num_threads': 'auto',    # 'auto' or integer
         'DEBUG_OVERLAY': False,
+        'svp_plugin_dir': '',
         'diag_log': ''            # absolute path; blank = next to this script
     }
     # Nuvio exports the config to script-opts/; the sibling path is kept as a fallback so a
@@ -68,7 +69,7 @@ def load_config():
                             cfg[key] = int(value)
                         except Exception:
                             pass
-                    elif key == 'diag_log':
+                    elif key in ('diag_log', 'svp_plugin_dir'):
                         cfg[key] = value
             cfg['_conf_path'] = conf_path
             cfg['_status'] = 'loaded'
@@ -193,7 +194,14 @@ def is_yuv420p8(clip):
         return False
 
 def load_local_plugin(name):
-    path = os.path.join(os.path.dirname(__file__), name)
+    if sys.platform == 'darwin':
+        stem = name.replace('_vs.dll', '').replace('.dll', '')
+        directory = str(config.get('svp_plugin_dir') or '')
+        candidates = [os.path.join(directory, candidate) for candidate in
+                      (stem + '.dylib', 'lib' + stem + '.dylib', 'lib' + stem + '_vs.dylib')]
+        path = next((candidate for candidate in candidates if os.path.isfile(candidate)), candidates[0])
+    else:
+        path = os.path.join(os.path.dirname(__file__), name)
     if not os.path.exists(path):
         path = os.path.join(os.path.dirname(os.path.dirname(sys.executable)), name)
     if not os.path.exists(path):

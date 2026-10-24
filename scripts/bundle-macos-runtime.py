@@ -35,13 +35,16 @@ def resolve(name, binary):
     return Path(name)
 
 
-def bundle(source, destination):
+def bundle(source, destination, namespace=""):
+    source = source.resolve()
+    def bundled_name(path):
+        return path.name if path.resolve() == source else namespace + path.name
     destination.mkdir(parents=True, exist_ok=True)
     pending = [source.resolve()]
     copied = {}
     while pending:
         original = pending.pop()
-        target = destination / original.name
+        target = destination / bundled_name(original)
         if target.name in copied:
             if copied[target.name] != original:
                 raise RuntimeError(f"Conflicting library names: {original} and {copied[target.name]}")
@@ -59,7 +62,7 @@ def bundle(source, destination):
             dependency = dependency.resolve(strict=True)
             pending.append(dependency)
             subprocess.check_call(["install_name_tool", "-change", name,
-                                   f"@loader_path/{dependency.name}", str(target)])
+                                   f"@loader_path/{bundled_name(dependency)}", str(target)])
         subprocess.check_call(["install_name_tool", "-id", f"@loader_path/{target.name}", str(target)])
         # Rewriting Mach-O load commands invalidates the original signature. Apple Silicon
         # requires at least an ad-hoc signature, including for local development builds.
@@ -73,6 +76,6 @@ def bundle(source, destination):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit("Usage: bundle-macos-runtime.py BRIDGE OUTPUT_DIRECTORY")
-    bundle(Path(sys.argv[1]), Path(sys.argv[2]))
+    if len(sys.argv) not in (3, 4):
+        sys.exit("Usage: bundle-macos-runtime.py BRIDGE OUTPUT_DIRECTORY [DEPENDENCY_PREFIX]")
+    bundle(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] if len(sys.argv) == 4 else "")
