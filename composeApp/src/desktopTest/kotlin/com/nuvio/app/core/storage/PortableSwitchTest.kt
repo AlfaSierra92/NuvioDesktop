@@ -43,6 +43,34 @@ class PortableSwitchTest {
         resolve(relative).also { Files.createDirectories(it.parent); it.writeText(text) }
 
     @Test
+    fun macosRoundTripPreservesAccountsAndNeverWritesInsideTheBundle() {
+        val bundle = root.resolve("Applications/Nuvio HTPC.app")
+        val launcher = bundle.file("Contents/MacOS/Nuvio HTPC", "original launcher")
+        bundle.file("Contents/Info.plist", "original bundle metadata")
+        val installed = desktopInstalledDataDirectory("Mac OS X", root.resolve("home")) { null }
+        val portableRoot = requireNotNull(desktopPortableInstallRoot(launcher, "Mac OS X"))
+        val data = portableRoot.resolve("data")
+        installed.file("accounts/alice/nuvio_player_settings.properties", "original settings")
+        installed.file("nuvio_account_slots.properties", "active=alice")
+        installed.file("image_cache/poster", "poster")
+
+        assertEquals(data, DesktopStorage.copyAppDataIntoPortable(installed, data))
+        assertEquals("active=alice", data.resolve("nuvio_account_slots.properties").readText())
+        data.file("accounts/alice/nuvio_player_settings.properties", "changed while portable")
+        data.file("return-to-appdata", "")
+        assertEquals(installed, DesktopStorage.returnPortableDataToAppData(data, installed))
+        assertEquals("changed while portable", installed.resolve("accounts/alice/nuvio_player_settings.properties").readText())
+        assertEquals("poster", installed.resolve("image_cache/poster").readText())
+        assertTrue(portableRoot.resolve("data.old/accounts/alice/nuvio_player_settings.properties").exists())
+        assertFalse(root.resolve("home/AppData").exists())
+        Files.walk(bundle).use { paths ->
+            assertEquals(setOf("Contents/MacOS/Nuvio HTPC", "Contents/Info.plist"),
+                paths.filter(Files::isRegularFile).map { bundle.relativize(it).toString() }.toList().toSet())
+        }
+        assertEquals("original launcher", launcher.readText())
+    }
+
+    @Test
     fun switchingOnCopiesSettingsMovesCachesAndSkipsTheRest() {
         appData.file("accounts/a-1/nuvio_player_settings.properties", "player")
         appData.file("nuvio_account_slots.properties", "slots")

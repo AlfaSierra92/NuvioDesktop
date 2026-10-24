@@ -854,13 +854,13 @@
     <string name="settings_updates_auto_install">Install Updates Automatically</string>
     <string name="settings_updates_auto_install_description">Does not auto accept prompt, just requires no manual extraction.</string>
     <string name="settings_portable_mode">Portable Mode</string>
-    <string name="settings_portable_mode_description">Keep settings and caches in a data folder beside Nuvio.exe instead of AppData. Switching restarts Nuvio and moves your data across.</string>
+    <string name="settings_portable_mode_description">Keep settings and caches beside the application instead of your system application-data folder. On macOS, they live in a separate .portable folder beside the .app. Switching restarts Nuvio and moves your data across.</string>
     <string name="settings_portable_mode_enable_title">Switch to portable mode?</string>
-    <string name="settings_portable_mode_enable_message">Nuvio will restart and copy your settings into a data folder next to Nuvio.exe. Image and torrent caches are not copied; they rebuild as you browse. Your AppData folder is left as it is.\n\nIf you have an antivirus exclusion for Nuvio, add the new data folder to it as well.</string>
+    <string name="settings_portable_mode_enable_message">Nuvio will restart and copy your settings into its portable data folder. On macOS this is inside a separate .portable folder beside the .app; the application bundle is left untouched. Eligible caches move with your settings; other caches rebuild as needed. Your system application-data settings are kept.\n\nTo move a portable macOS installation, keep the .app and its matching .portable folder together.</string>
     <string name="settings_portable_mode_disable_title">Turn off portable mode?</string>
-    <string name="settings_portable_mode_disable_message">Nuvio will restart and copy your settings back to AppData. The portable folder is kept as data.old next to Nuvio.exe, and you can delete it afterwards.</string>
+    <string name="settings_portable_mode_disable_message">Nuvio will restart and copy your settings back to your system application-data folder (Application Support on macOS). The portable data folder is kept as data.old inside the portable location, and you can delete it afterwards.</string>
     <string name="settings_portable_mode_restart">Restart</string>
-    <string name="settings_portable_mode_failed">Could not write to the folder Nuvio.exe is in. Move Nuvio somewhere your account can write to and try again.</string>
+    <string name="settings_portable_mode_failed">Could not write to the portable location beside the application. Move Nuvio somewhere your account can write to and try again.</string>
     <string name="settings_advanced_remember_last_profile">Remember Last Profile</string>
     <string name="settings_advanced_remember_last_profile_description">Remember last selected profile at startup</string>
     <string name="settings_advanced_clear_cw_cache">Clear Continue Watching Cache</string>
