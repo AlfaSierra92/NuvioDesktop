@@ -10,15 +10,11 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: macos-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build-macos:
     name: Build macOS ARM64
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     defaults:
       run:
@@ -43,25 +39,54 @@ jobs:
 
       - name: Install native dependencies
         run: |
-          brew install mpv pkg-config
+          set -euo pipefail
 
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          brew install \
+            mpv \
+            pkg-config \
+            cmake \
+            openssl@3 \
+            llvm@19
 
+          LLVM_HOME="$(brew --prefix llvm@19)"
+
+          echo "LLVM_HOME=$LLVM_HOME" >> "$GITHUB_ENV"
+
+          "$LLVM_HOME/bin/clang++" --version
+          cmake --version
           pkg-config --modversion mpv
-          xcrun --find clang++
-          java -version
 
           test "$(uname -m)" = "arm64"
 
-      - name: Verify build prerequisites
+      - name: Clone NuvioEngine
         run: |
+          set -euo pipefail
+
+          ENGINE_SOURCE="$RUNNER_TEMP/nuvio-engine"
+
+          git clone --depth 1 \
+            https://github.com/NuvioMedia/nuvio-engine.git \
+            "$ENGINE_SOURCE"
+
+          test -f "$ENGINE_SOURCE/CMakeLists.txt"
+
+          echo "ENGINE_SOURCE=$ENGINE_SOURCE" >> "$GITHUB_ENV"
+
+      - name: Build NuvioEngine
+        run: |
+          set -euo pipefail
+
           chmod +x gradlew
 
-          test -f composeApp/build.gradle.kts
-          test -f composeApp/Configuration/DesktopVersion.properties
-          test -f composeApp/src/desktopMain/native/macos/player_bridge.mm
+          ./gradlew :composeApp:buildMacosNuvioEngine \
+            "-Pnuvio.engine.sourceDir=$ENGINE_SOURCE" \
+            "-Pnuvio.macos.llvmHome=$LLVM_HOME" \
+            --no-configuration-cache \
+            --no-daemon \
+            --stacktrace
 
-          ./gradlew --version
+          test -s \
+            composeApp/build/native/macos/libnuvio_engine.dylib
 
       - name: Build release DMG
         env:
@@ -70,28 +95,25 @@ jobs:
           NUVIO_MACOS_NOTARY_TEAM_ID: ""
           NUVIO_MACOS_NOTARY_PASSWORD: ""
         run: |
+          set -euo pipefail
+
           ./gradlew :composeApp:packageReleaseDmg \
+            "-Pnuvio.engine.sourceDir=$ENGINE_SOURCE" \
+            "-Pnuvio.macos.llvmHome=$LLVM_HOME" \
             -Pcompose.desktop.packaging.checkJdkVendor=false \
             --no-configuration-cache \
             --no-daemon \
             --stacktrace
 
       - name: Prepare DMG
-        id: package
         run: |
           set -euo pipefail
 
-          DMG_DIR="composeApp/build/compose/binaries/main-release/dmg"
+          DMG=$(find composeApp/build/compose \
+            -type f -name "*.dmg" -print -quit)
 
-          test -d "$DMG_DIR"
-
-          mapfile -t DMGS < <(
-            find "$DMG_DIR" -maxdepth 1 -type f -name "*.dmg" | sort
-          )
-
-          if [ "${#DMGS[@]}" -ne 1 ]; then
-            echo "Expected exactly one DMG, found ${#DMGS[@]}"
-            find composeApp/build/compose -name "*.dmg" || true
+          if [ -z "$DMG" ]; then
+            echo "ERROR: DMG not found"
             exit 1
           fi
 
@@ -105,12 +127,15 @@ jobs:
 
           OUTPUT="release/NuvioDesktop-${VERSION}-macOS-arm64.dmg"
 
-          cp "${DMGS[0]}" "$OUTPUT"
+          cp "$DMG" "$OUTPUT"
 
           hdiutil verify "$OUTPUT"
-          shasum -a 256 "$OUTPUT" > "$OUTPUT.sha256"
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          (
+            cd release
+            shasum -a 256 "$(basename "$OUTPUT")" \
+              > "$(basename "$OUTPUT").sha256"
+          )
 
           ls -lh release/
 
@@ -120,17 +145,15 @@ jobs:
           name: NuvioDesktop-macOS-ARM64
           path: release/*
           if-no-files-found: error
-          retention-days: 14
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.package.outputs.version }}
         run: |
-          gh release create "$VERSION" \
+          gh release create "$GITHUB_REF_NAME" \
             release/* \
-            --title "NuvioDesktop $VERSION" \
+            --title "NuvioDesktop $GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag
 
