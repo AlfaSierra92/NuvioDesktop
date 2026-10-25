@@ -14,17 +14,12 @@ import com.nuvio.app.features.player.autosync.AutoSyncTimelineRetimer
 import com.nuvio.app.features.player.autosync.AutomaticSubtitleSync
 import com.nuvio.app.features.player.autosync.EmbeddedSubtitleTimelineLoader
 import com.nuvio.app.features.player.autosync.maxAlignmentShiftMs
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 
 private val log = Logger.withTag("AutoSync")
-
-/** Index prefetches outlive the player screen's composition on purpose: the loader caches them. */
-private val prefetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 private val syncDirectory: File by lazy {
     File(System.getProperty("java.io.tmpdir"), "nuvio-autosync").apply {
@@ -41,8 +36,8 @@ private val resultCache = object : LinkedHashMap<String, AutomaticSubtitleSyncRe
         size > 16
 }
 
-internal actual fun prefetchAutomaticSubtitleSyncIndex(sourceUrl: String, sourceHeaders: Map<String, String>) {
-    EmbeddedSubtitleTimelineLoader.prefetch(prefetchScope, sourceUrl, sourceHeaders)
+internal actual suspend fun prefetchAutomaticSubtitleSyncIndex(sourceUrl: String, sourceHeaders: Map<String, String>) {
+    EmbeddedSubtitleTimelineLoader.load(sourceUrl, sourceHeaders)
 }
 
 internal actual suspend fun runAutomaticSubtitleSync(

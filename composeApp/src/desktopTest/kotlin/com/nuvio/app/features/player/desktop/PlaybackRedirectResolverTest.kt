@@ -4,6 +4,19 @@ import com.nuvio.app.features.player.isPlaybackPlaceholderUrl
 import com.nuvio.app.features.player.isProviderStatusClipUrl
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -16,6 +29,164 @@ import kotlin.test.assertTrue
  * at the debrid API) or pins a CDN token FFmpeg would have refreshed for free.
  */
 class PlaybackRedirectResolverTest {
+
+    @Test
+    fun cancellingProbeClosesTheConnectionAtTheServer() = runBlocking {
+        // Check the actual TCP socket, not only the coroutine's cancelled flag.
+        repeat(10) {
+            ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+                server.soTimeout = 5_000
+                val headersReceived = CountDownLatch(1)
+                val closed = async(Dispatchers.IO) {
+                    server.accept().use { socket ->
+                        socket.soTimeout = 5_000
+                        val input = socket.getInputStream().bufferedReader()
+                        assertTrue(input.readLine().startsWith("HEAD "))
+                        while (!input.readLine().isNullOrEmpty()) { /* consume headers */ }
+                        headersReceived.countDown()
+                        // No response headers: closing the player must close this pending request.
+                        input.read()
+                    }
+                }
+                val pending = async {
+                    PlaybackRedirectResolver.resolve(
+                        "http://127.0.0.1:${server.localPort}/${UUID.randomUUID()}", emptyMap(),
+                    )
+                }
+                try {
+                    assertTrue(withContext(Dispatchers.IO) { headersReceived.await(5, TimeUnit.SECONDS) })
+                    pending.cancel()
+                    withTimeout(1_000) {
+                        pending.join()
+                        assertEquals(-1, closed.await(), "Server must observe EOF after cancellation")
+                    }
+                } finally {
+                    pending.cancel()
+                    closed.cancel()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun slowRedirectChainSharesOneStartupDeadline() = runBlocking {
+        withProbeServer { server, source, requests ->
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                try {
+                    Thread.sleep(1_400)
+                    exchange.responseHeaders.add("Location", "${exchange.requestURI.path}/next")
+                    exchange.responseHeaders.add("Cache-Control", "no-store")
+                    exchange.sendResponseHeaders(307, -1)
+                } catch (_: Exception) {
+                    // The client timed out or the test stopped the server.
+                } finally {
+                    exchange.close()
+                }
+            }
+            val start = System.nanoTime()
+            val result = PlaybackRedirectResolver.resolve(source, emptyMap())
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            assertEquals(PlaybackRedirectResolution.Outcome.Failed, result.outcome)
+            assertEquals(source, result.playbackUrl)
+            assertTrue(requests.size >= 2, "Must exercise multiple same-host redirects")
+            assertTrue(elapsedMs < 5_500, "Chain took ${elapsedMs}ms instead of sharing the 4s budget")
+        }
+    }
+
+    @Test
+    fun coldMediaIsOnlyInspectedWithHead() = runBlocking {
+        withProbeServer { server, source, requests ->
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                assertEquals(null, exchange.requestHeaders.getFirst("Range"))
+                assertEquals("Bearer test", exchange.requestHeaders.getFirst("Authorization"))
+                exchange.sendResponseHeaders(200, -1)
+                exchange.close()
+            }
+            val result = PlaybackRedirectResolver.resolve(source, mapOf("Authorization" to "Bearer test"))
+            assertEquals(PlaybackRedirectResolution.Outcome.NoRedirect, result.outcome)
+            assertEquals(listOf("HEAD"), requests.toList())
+        }
+    }
+
+    @Test
+    fun unsupportedHeadDoesNotOpenADownload() = runBlocking {
+        withProbeServer { server, source, requests ->
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                exchange.sendResponseHeaders(405, -1)
+                exchange.close()
+            }
+            val result = PlaybackRedirectResolver.resolve(source, emptyMap())
+            assertEquals(PlaybackRedirectResolution.Outcome.Failed, result.outcome)
+            assertEquals(source, result.playbackUrl)
+            assertEquals(listOf("HEAD"), requests.toList())
+        }
+    }
+
+    @Test
+    fun headStillPinsUncacheableRedirectsWithoutOpeningTarget() = runBlocking {
+        withProbeServer { server, source, requests ->
+            val target = "https://media.example/video.mkv"
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                exchange.responseHeaders.add("Location", target)
+                exchange.responseHeaders.add("Cache-Control", "no-store")
+                exchange.sendResponseHeaders(307, -1)
+                exchange.close()
+            }
+            val result = PlaybackRedirectResolver.resolve(source, emptyMap())
+            assertEquals(PlaybackRedirectResolution.Outcome.Pinned, result.outcome)
+            assertEquals(target, result.playbackUrl)
+            assertEquals(listOf("HEAD"), requests.toList())
+        }
+    }
+
+    @Test
+    fun closingPlayerCancelsPendingHeadersWithoutRememberingFailure() = runBlocking {
+        withProbeServer { server, source, requests ->
+            val started = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                if (requests.size == 1) {
+                    started.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                }
+                runCatching { exchange.sendResponseHeaders(200, -1) }
+                exchange.close()
+            }
+            val pending = async { PlaybackRedirectResolver.resolve(source, emptyMap()) }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { started.await(5, TimeUnit.SECONDS) })
+                pending.cancel()
+                withTimeout(1_000) { pending.join() }
+                assertTrue(pending.isCancelled)
+            } finally {
+                release.countDown()
+            }
+            val retry = PlaybackRedirectResolver.resolve(source, emptyMap())
+            assertEquals(PlaybackRedirectResolution.Outcome.NoRedirect, retry.outcome)
+            assertEquals(listOf("HEAD", "HEAD"), requests.toList())
+        }
+    }
+
+    private suspend fun withProbeServer(
+        block: suspend (HttpServer, String, CopyOnWriteArrayList<String>) -> Unit,
+    ) {
+        val executor = Executors.newCachedThreadPool()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.executor = executor
+        server.start()
+        try {
+            // Endpoint verdicts are process-wide, so each test needs its own path.
+            block(server, "http://127.0.0.1:${server.address.port}/${UUID.randomUUID()}", CopyOnWriteArrayList())
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
 
     private val now: ZonedDateTime = ZonedDateTime.of(2026, 9, 14, 19, 0, 0, 0, ZoneOffset.UTC)
 

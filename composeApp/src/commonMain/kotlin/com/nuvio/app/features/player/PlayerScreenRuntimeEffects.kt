@@ -359,6 +359,11 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
         if (playerSettingsUiState.automaticSubtitleSyncEnabled && !isIptvPlayback &&
             (sourceUrl.startsWith("http://", ignoreCase = true) || sourceUrl.startsWith("https://", ignoreCase = true))
         ) {
+            // A cold WebDAV file may need server-side preparation. Let the player's first open
+            // finish before competing with it, and keep this work owned by the source's effect.
+            snapshotFlow {
+                playerControllerSourceUrl == sourceUrl && playbackSnapshot.isPlaying && !playbackSnapshot.isLoading
+            }.first { it }
             prefetchAutomaticSubtitleSyncIndex(sourceUrl, activeSourceHeaders)
         }
     }

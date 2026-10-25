@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player.autosync
 
+import com.nuvio.app.features.player.prefetchAutomaticSubtitleSyncIndex
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -17,6 +18,22 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class EmbeddedSubtitleTimelineLoaderTest {
+    @Test
+    fun playerIndexPrefetchIsCancelledWithItsCaller(): Unit = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            val url = server.url("/player-lifecycle.mkv").toString()
+            val prefetch = async { prefetchAutomaticSubtitleSyncIndex(url, emptyMap()) }
+            assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
+            withTimeout(1_000L) { prefetch.cancelAndJoin() }
+
+            // Cancellation must not cache a failed index or leave a detached owner behind.
+            server.enqueue(MockResponse().setResponseCode(404))
+            assertNull(withTimeout(3_000L) { EmbeddedSubtitleTimelineLoader.load(url, emptyMap()) })
+            assertEquals(2, server.requestCount)
+        }
+    }
+
     @Test
     fun concurrentIndexLoadsShareOneDownload(): Unit = runBlocking {
         MockWebServer().use { server ->

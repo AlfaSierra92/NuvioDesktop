@@ -5,7 +5,10 @@ import com.nuvio.app.core.perf.PerfTelemetry
 import com.nuvio.app.core.storage.DesktopStorage
 import com.nuvio.app.features.player.isPlaybackPlaceholderUrl
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -188,14 +191,18 @@ internal object PlaybackRedirectResolver {
             }
         }
 
-        val resolution = probeChain(normalized, sourceHeaders)
+        // One budget for the entire chain, including same-host redirects. Cancellation of the
+        // player effect also cancels the underlying HTTP exchange instead of leaving it running.
+        val resolution = withTimeoutOrNull(REQUEST_TIMEOUT.toMillis()) {
+            probeChain(normalized, sourceHeaders)
+        } ?: PlaybackRedirectResolution.unchanged(normalized, PlaybackRedirectResolution.Outcome.Failed)
         // Pinned and Placeholder are verdicts on the link (the next one from the same resolver
         // may pin fine); the rest describe the endpoint itself and end the probing.
         if (resolution.outcome in REMEMBERED_OUTCOMES) rememberVerdict(endpoint, resolution.outcome)
         resolution
     }
 
-    private fun probeChain(
+    private suspend fun probeChain(
         normalized: String,
         sourceHeaders: Map<String, String>,
     ): PlaybackRedirectResolution {
@@ -204,6 +211,7 @@ internal object PlaybackRedirectResolver {
         var everyRedirectCacheable = true
         while (true) {
             val response = runCatching { probe(current, sourceHeaders) }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 log.w { "probe failed hop=$hops host=${hostOf(current)}: ${error.message}" }
                 return PlaybackRedirectResolution.unchanged(
                     normalized,
@@ -274,16 +282,15 @@ internal object PlaybackRedirectResolver {
     )
 
     /**
-     * One request, body never read. `Range: bytes=0-0` keeps a resolver that answers 200 with the
-     * media itself down to a byte; closing the stream before EOF drops the connection for anyone
-     * who ignores Range.
+     * Inspect headers without opening a media download. A range GET can trigger cold WebDAV
+     * preparation and leave a server-side transfer behind even after its body is closed locally.
+     * If HEAD is unsupported, let mpv open the original URL rather than making a second GET.
      */
-    private fun probe(url: String, sourceHeaders: Map<String, String>): ProbeResponse {
+    private suspend fun probe(url: String, sourceHeaders: Map<String, String>): ProbeResponse {
         val builder = HttpRequest.newBuilder()
             .uri(URI(url))
             .timeout(REQUEST_TIMEOUT)
-            .header("Range", "bytes=0-0")
-            .GET()
+            .method("HEAD", HttpRequest.BodyPublishers.noBody())
         var hasUserAgent = false
         sourceHeaders.forEach { (key, value) ->
             val cleanKey = key.trim()
@@ -302,9 +309,15 @@ internal object PlaybackRedirectResolver {
 
         val request = builder.build()
         val response = PerfTelemetry.timedHttp("redirect-probe", request.method(), request.uri().toString(), { it.statusCode() }) {
-            client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            suspendCancellableCoroutine<HttpResponse<Void>> { continuation ->
+                val future = client.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                continuation.invokeOnCancellation { future.cancel(true) }
+                future.whenComplete { result, error ->
+                    if (error != null) continuation.resumeWith(Result.failure(error))
+                    else continuation.resumeWith(Result.success(result))
+                }
+            }
         }
-        runCatching { response.body().close() }
         val headers = response.headers()
         return ProbeResponse(
             requestUrl = url,
