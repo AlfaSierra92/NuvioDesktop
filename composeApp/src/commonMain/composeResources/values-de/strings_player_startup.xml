@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Quelle wird vorbereitet…</string>
+    <string name="player_startup_resolving">Stream-Link wird geprüft…</string>
+    <string name="player_startup_alternative">Verfügbarer Server wird gesucht…</string>
+    <string name="player_startup_initializing">Player wird gestartet…</string>
+    <string name="player_startup_buffering">Video wird gepuffert…</string>
+</resources>

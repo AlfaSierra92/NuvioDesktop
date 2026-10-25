@@ -537,7 +537,9 @@ fun main(args: Array<String>) {
     desktopStartupStep("artwork prewarm") { com.nuvio.app.core.ui.ArtworkPrewarmer.start() }
     System.out.println("Info: (DesktopStartup) entering Compose application")
 
-    application {
+    // Keep control after Compose tears down its windows: the default calls System.exit and
+    // would skip the stream teardown and cache flush below.
+    application(exitProcessOnExit = false) {
         remember {
             System.out.println(
                 "Info: (DesktopStartup) Compose application composition entered after " +
@@ -1113,6 +1115,13 @@ fun main(args: Array<String>) {
             }
         }
     }
+
+    // Player disposal runs off the UI thread. In particular, a WebDAV response must be closed
+    // before terminating the JVM, rather than leaving its server/proxy to detect an abrupt exit.
+    // Track attach workers too: an in-flight create can return after its surface was disposed and
+    // still needs to tear down the newly-created native player. Bound the wait for wedged drivers.
+    val nativePlayersStopped = com.nuvio.app.features.player.desktop.nativePlayerTasks.awaitIdle(5_000L)
+    System.out.println("Info: (DesktopShutdown) native player cleanup completed=$nativePlayersStopped")
 
     // The hero cast and MDBList ratings caches batch their writes rather than rewriting a 3.4 MB
     // file per title (see CoalescingCachePersister), so anything from the last few seconds is still

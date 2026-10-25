@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Προετοιμασία πηγής…</string>
+    <string name="player_startup_resolving">Έλεγχος συνδέσμου βίντεο…</string>
+    <string name="player_startup_alternative">Αναζήτηση διαθέσιμου διακομιστή…</string>
+    <string name="player_startup_initializing">Εκκίνηση προγράμματος αναπαραγωγής…</string>
+    <string name="player_startup_buffering">Φόρτωση βίντεο στην προσωρινή μνήμη…</string>
+</resources>

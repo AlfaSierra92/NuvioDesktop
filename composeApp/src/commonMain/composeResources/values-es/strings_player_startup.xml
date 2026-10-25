@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Preparando la fuente…</string>
+    <string name="player_startup_resolving">Comprobando el enlace del vídeo…</string>
+    <string name="player_startup_alternative">Buscando un servidor disponible…</string>
+    <string name="player_startup_initializing">Iniciando el reproductor…</string>
+    <string name="player_startup_buffering">Almacenando vídeo en búfer…</string>
+</resources>

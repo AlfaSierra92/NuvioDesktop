@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Przygotowywanie źródła…</string>
+    <string name="player_startup_resolving">Sprawdzanie łącza do filmu…</string>
+    <string name="player_startup_alternative">Wyszukiwanie dostępnego serwera…</string>
+    <string name="player_startup_initializing">Uruchamianie odtwarzacza…</string>
+    <string name="player_startup_buffering">Buforowanie filmu…</string>
+</resources>

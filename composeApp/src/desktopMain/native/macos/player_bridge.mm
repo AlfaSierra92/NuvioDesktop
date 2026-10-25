@@ -1526,6 +1526,9 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         if (!userOption) [configured addObject:key];
     }
 
+    // Native warnings are otherwise lost to stderr and never reach nuvio.log on macOS.
+    // Keep them diagnostic: only END_FILE_REASON_ERROR below signals a playback failure.
+    mpv_request_log_messages(_mpv, "warn");
     int initResult = mpv_initialize(_mpv);
     if (initResult < 0) {
         NSString *reason = [NSString stringWithFormat:@"mpv_initialize failed: %s", mpv_error_string(initResult)];
@@ -1601,6 +1604,20 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 mpv_event *event = mpv_wait_event(mpv, 0.0);
                 if (!event || event->event_id == MPV_EVENT_NONE) break;
                 switch (event->event_id) {
+                    case MPV_EVENT_LOG_MESSAGE: {
+                        const mpv_event_log_message *message = (const mpv_event_log_message *)event->data;
+                        if (message && message->text) {
+                            NSString *prefix = [NSString stringWithUTF8String:message->prefix ?: "mpv"] ?: @"mpv";
+                            NSString *text = [NSString stringWithUTF8String:message->text] ?: @"";
+                            // Bound the payload before sending it through JNI; Kotlin redacts URLs.
+                            if (text.length > 2048) text = [text substringToIndex:2048];
+                            [events addObject:@{
+                                @"type": [NSString stringWithFormat:@"mpvWarning:[%@] %@", prefix, text],
+                                @"value": @(message->log_level),
+                            }];
+                        }
+                        break;
+                    }
                     case MPV_EVENT_START_FILE:
                         self->_playbackRestartReported = NO;
                         refreshTracks = YES;

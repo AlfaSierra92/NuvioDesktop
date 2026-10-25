@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Menyiapkan sumber…</string>
+    <string name="player_startup_resolving">Memeriksa tautan video…</string>
+    <string name="player_startup_alternative">Mencari server yang tersedia…</string>
+    <string name="player_startup_initializing">Memulai pemutar…</string>
+    <string name="player_startup_buffering">Menyangga video…</string>
+</resources>

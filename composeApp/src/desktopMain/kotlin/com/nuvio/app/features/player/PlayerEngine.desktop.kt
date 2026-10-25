@@ -11,6 +11,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +66,12 @@ import nuvio.composeapp.generated.resources.player_error_debrid_rate_limited
 import nuvio.composeapp.generated.resources.player_rate_limit_reconnecting
 import nuvio.composeapp.generated.resources.player_rate_limit_switching_server
 import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.stringResource
+import nuvio.composeapp.generated.resources.player_startup_preparing
+import nuvio.composeapp.generated.resources.player_startup_resolving
+import nuvio.composeapp.generated.resources.player_startup_alternative
+import nuvio.composeapp.generated.resources.player_startup_initializing
+import nuvio.composeapp.generated.resources.player_startup_buffering
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
 import javax.swing.text.JTextComponent
@@ -130,6 +137,10 @@ actual fun PlatformPlayerSurface(
     )
 }
 
+private enum class PlayerStartupPhase {
+    Preparing, Resolving, Alternative, Initializing, Buffering,
+}
+
 @Composable
 private fun NativePlayerSurface(
     sourceUrl: String,
@@ -153,6 +164,19 @@ private fun NativePlayerSurface(
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
 ) {
+    var startupPhase by remember(playbackAttemptId, sourceUrl) { mutableStateOf(PlayerStartupPhase.Preparing) }
+    var controlsPresented by remember(playbackAttemptId, sourceUrl) { mutableStateOf(false) }
+    val startupMessage = stringResource(when (startupPhase) {
+        PlayerStartupPhase.Preparing -> Res.string.player_startup_preparing
+        PlayerStartupPhase.Resolving -> Res.string.player_startup_resolving
+        PlayerStartupPhase.Alternative -> Res.string.player_startup_alternative
+        PlayerStartupPhase.Initializing -> Res.string.player_startup_initializing
+        PlayerStartupPhase.Buffering -> Res.string.player_startup_buffering
+    })
+    // Pass exactly the same localized status to both sides of the startup handoff.
+    val startupControlsState = playerControlsState.copy(
+        openingMessage = playerControlsState.openingMessage ?: startupMessage,
+    )
     val host = remember { NativePlayerHost() }
     val controller = remember(host) { NativePlayerController(host) }
     val hostFirstPaintComplete = remember { mutableStateOf(false) }
@@ -171,6 +195,7 @@ private fun NativePlayerSurface(
     // rendered its first frame. The snapshot loop below publishes nothing real until the second
     // equals the current attempt — see the comment there for what went wrong without it.
     val attachedAttemptId = remember { mutableStateOf<Long?>(null) }
+    val attachedSourceUrl = remember { mutableStateOf<String?>(null) }
     val startedAttemptId = remember { mutableStateOf<Long?>(null) }
     // Redirect resolutions for this surface's lifetime, keyed by the stream's source URL. A
     // re-attach of the same stream (RTX/settings toggles re-key the attach effect) must hand the
@@ -220,6 +245,16 @@ private fun NativePlayerSurface(
     val latestOnPlayerControlsScrubFinished = rememberUpdatedState(onPlayerControlsScrubFinished)
     val latestOnSnapshot = rememberUpdatedState(onSnapshot)
     val latestOnError = rememberUpdatedState(onError)
+    val latestOnControlsPresented = rememberUpdatedState({
+        if (attachedAttemptId.value == playbackAttemptId && attachedSourceUrl.value == sourceUrl) {
+            controlsPresented = true
+        }
+    })
+    val latestOnFileLoaded = rememberUpdatedState({
+        if (attachedAttemptId.value == playbackAttemptId && attachedSourceUrl.value == sourceUrl) {
+            startupPhase = PlayerStartupPhase.Buffering
+        }
+    })
 
     LaunchedEffect(controller, playbackAttemptId, sourceUrl) {
         onControllerReady(controller)
@@ -301,7 +336,12 @@ private fun NativePlayerSurface(
                 } else if (type == "displayHdr") {
                     displayHdrEnabled.value = value != 0.0
                     true
+                } else if (type == "controlsPresented") {
+                    latestOnControlsPresented.value()
+                    PlaybackStartTrace.markStartupDetail("controlsPresented")
+                    true
                 } else if (type == "fileLoaded") {
+                    latestOnFileLoaded.value()
                     PlaybackStartTrace.mark("fileLoaded")
                     videoProfileRefreshToken.intValue += 1
                     true
@@ -510,6 +550,7 @@ private fun NativePlayerSurface(
         // Follow the addon's redirect chain once here rather than letting FFmpeg re-walk it on
         // every seek (see PlaybackRedirectResolver). The source URL stays the stream's identity;
         // only what mpv opens changes.
+        startupPhase = PlayerStartupPhase.Resolving
         var resolution = redirectResolutions[sourceUrl]
             ?: PlaybackRedirectResolver.resolve(sourceUrl, playbackHeaders)
                 .also { redirectResolutions[sourceUrl] = it }
@@ -517,6 +558,7 @@ private fun NativePlayerSurface(
         // an hour, and addons hand back their cached link on that same node. Start on another
         // node instead of opening straight into the ban.
         if (TorBoxNodeHop.isBanned(resolution.playbackUrl)) {
+            startupPhase = PlayerStartupPhase.Alternative
             TorBoxNodeHop.findAlternative(resolution.playbackUrl, playbackUserAgent)?.let { hopped ->
                 BingeAdvanceLog.i {
                     "desktop TorBox node avoided at attach attemptId=$playbackAttemptId" +
@@ -901,6 +943,7 @@ private fun NativePlayerSurface(
             }
         }
         controller.rateLimitFailoverFallback = onSurfaceError::reconnectAsFailoverFallback
+        startupPhase = PlayerStartupPhase.Initializing
         attachWith(
             playbackUrl = resolution.playbackUrl,
             positionMs = initialPositionMs,
@@ -909,6 +952,7 @@ private fun NativePlayerSurface(
             onError = onSurfaceError,
         )
         attachedAttemptId.value = playbackAttemptId
+        attachedSourceUrl.value = sourceUrl
         onPlayerAttached()
     }
 
@@ -924,8 +968,8 @@ private fun NativePlayerSurface(
         controller.setResizeMode(resizeMode)
     }
 
-    LaunchedEffect(controller, playerControlsState) {
-        controller.updateControls(playerControlsState)
+    LaunchedEffect(controller, startupControlsState) {
+        controller.updateControls(startupControlsState)
     }
 
     LaunchedEffect(playbackAttemptId, sourceUrl) {
@@ -1160,6 +1204,29 @@ private fun NativePlayerSurface(
                 },
                 background = Color.Black,
             )
+        }
+        // Keep the cover in its own owned window: ordinary Compose layers render underneath
+        // the heavyweight video Canvas on desktop.
+        if (playerControlsState.showOpeningOverlay && !controlsPresented) {
+            if (hostFirstPaintComplete.value) {
+                DesktopPlayerStartupOverlay(
+                    host = host,
+                    controls = startupControlsState,
+                    onBack = { latestOnPlayerControlsAction.value(PlayerControlsAction.Back) },
+                )
+            } else {
+                // Before the Canvas gets its peer there is no owner for the cover window yet.
+                OpeningOverlay(
+                    artwork = startupControlsState.openingArtwork,
+                    logo = startupControlsState.openingLogo,
+                    title = startupControlsState.openingTitle,
+                    onBack = { latestOnPlayerControlsAction.value(PlayerControlsAction.Back) },
+                    horizontalSafePadding = 0.dp,
+                    modifier = Modifier.fillMaxSize(),
+                    message = startupControlsState.openingMessage,
+                    progress = startupControlsState.openingProgress,
+                )
+            }
         }
     }
 }

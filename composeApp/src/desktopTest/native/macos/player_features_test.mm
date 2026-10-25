@@ -5,8 +5,13 @@
 
 @interface FeatureTestPlayer : MpvWebPlayer
 @property(atomic) int thumbnails;
+@property(atomic) int diagnosticWarnings;
 @end
 @implementation FeatureTestPlayer
+- (void)sendPlayerEvent:(NSString *)type value:(double)value {
+    if ([type hasPrefix:@"mpvWarning:"]) self.diagnosticWarnings++;
+    [super sendPlayerEvent:type value:value];
+}
 - (void)runJavaScript:(NSString *)script {
     if ([script containsString:@"window.nuvioSeekThumbnailReady("] && [script containsString:@"base64,"]) self.thumbnails++;
     [super runJavaScript:script];
@@ -82,6 +87,16 @@ int main(int argc, const char **argv) {
         pumpFor(0.3);
         assert([[player stringProperty:"video-crop" fallback:@""] isEqualToString:@""]);
         puts("PASS: leaving AutoCrop restores the whole frame");
+        // A recoverable audio-filter error must be available to diagnostics without becoming a
+        // playback-failure event. This is a test-only invalid filter, restored immediately.
+        int warningCount = player.diagnosticWarnings;
+        [player setStringProperty:"af" value:@"lavfi=[nuvio_missing_filter_for_diagnostics]"];
+        for (int wait = 0; wait < 40 && player.diagnosticWarnings == warningCount; ++wait) pumpFor(0.1);
+        assert(player.diagnosticWarnings > warningCount);
+        [player setStringProperty:"af" value:@""];
+        pumpFor(0.5);
+        assert([player stringProperty:"audio-params/format" fallback:@""].length > 0);
+        puts("PASS: native audio warnings are forwarded and decoding remains available after recovery");
         [player shutdown];
         assert(MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo == nil);
         puts("PASS: Now Playing metadata, pause state and session cleanup");

@@ -82,7 +82,6 @@ import kotlinx.serialization.json.Json
 import java.util.concurrent.atomic.AtomicLong
 import javax.swing.SwingUtilities
 import kotlin.concurrent.Volatile
-import kotlin.concurrent.thread
 import kotlin.math.floor
 
 /**
@@ -352,7 +351,7 @@ internal class NativePlayerController(
             lastSentControlsStructureKey = null
             lastSentMediaSessionKey = null
             lastSentMpvMediaTitle = null
-            thread(isDaemon = true, name = "Nuvio-Player-Attach") {
+            nativePlayerTasks.launch(name = "Nuvio-Player-Attach") {
                 synchronized(nativeProcessLifecycleLock) {
                     // Replacement is intentionally sequential. Both operations remain on this
                     // worker, so a slow native shutdown delays the next stream without freezing
@@ -1119,6 +1118,12 @@ internal class NativePlayerController(
 
     private fun handlePlayerEvent(type: String, value: Double) {
         if (disposed) return
+        nativePlaybackWarningText(type)?.let { warning ->
+            // mpv error-level output can describe a recovered audio/device attempt. Its log level
+            // is diagnostic; only the existing end-file error events trigger playback failover.
+            if (value <= 20.0) nativePlaybackLog.e { warning } else nativePlaybackLog.w { warning }
+            return
+        }
         if (type == "playbackRestart") {
             // First rendered frame of the replacement source. Deliver a message held across a
             // source switch (the failover "trying next source" pill) only now: showing it when
@@ -1544,7 +1549,7 @@ internal class NativePlayerController(
         meteredPrefetchFrozen = false
         if (current != 0L) {
             val serialized = mayHostVapourSynth
-            kotlin.concurrent.thread(isDaemon = true, name = "Nuvio-Player-Dispose") {
+            nativePlayerTasks.launch(name = "Nuvio-Player-Dispose") {
                 if (serialized) {
                     synchronized(nativeProcessLifecycleLock) {
                         runCatching { NativePlayerBridge.dispose(current) }

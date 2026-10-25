@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Příprava zdroje…</string>
+    <string name="player_startup_resolving">Kontrola odkazu na video…</string>
+    <string name="player_startup_alternative">Hledání dostupného serveru…</string>
+    <string name="player_startup_initializing">Spouštění přehrávače…</string>
+    <string name="player_startup_buffering">Načítání videa do vyrovnávací paměti…</string>
+</resources>

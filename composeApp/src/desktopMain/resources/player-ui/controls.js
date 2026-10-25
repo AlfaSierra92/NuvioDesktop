@@ -7182,6 +7182,18 @@ window.playerControls = nextState => {
     openPlayerModal("sources");
   }
   render();
+  if (isFirstPlayerControls) {
+    // Two frames let the native UI paint before the app removes its startup cover. A covered
+    // WebView may suspend animation frames, so acknowledge the applied DOM on a timer as well.
+    let presented = false;
+    const acknowledge = () => {
+      if (presented) return;
+      presented = true;
+      send("controlsPresented", 0);
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(acknowledge));
+    window.setTimeout(acknowledge, 400);
+  }
 };
 
 let activePipPointerId = null;

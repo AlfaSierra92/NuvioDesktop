@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Forbereder kilde…</string>
+    <string name="player_startup_resolving">Kontrollerer videolenken…</string>
+    <string name="player_startup_alternative">Søker etter en tilgjengelig server…</string>
+    <string name="player_startup_initializing">Starter avspilleren…</string>
+    <string name="player_startup_buffering">Bufrer video…</string>
+</resources>

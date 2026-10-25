@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_startup_preparing">Kaynak hazırlanıyor…</string>
+    <string name="player_startup_resolving">Video bağlantısı kontrol ediliyor…</string>
+    <string name="player_startup_alternative">Kullanılabilir sunucu aranıyor…</string>
+    <string name="player_startup_initializing">Oynatıcı başlatılıyor…</string>
+    <string name="player_startup_buffering">Video arabelleğe alınıyor…</string>
+</resources>
