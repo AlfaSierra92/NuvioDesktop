@@ -31,6 +31,13 @@
 @class NuvioPlayerOpenGLLayer;
 static __weak MpvWebPlayer *nuvioMediaOwner;
 
+static bool isHdrVideoTransfer(NSString *transfer) {
+    NSString *normalized = [[transfer ?: @"" lowercaseString]
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [normalized containsString:@"pq"] || [normalized containsString:@"2084"]
+        || [normalized containsString:@"hlg"] || [normalized isEqualToString:@"arib-std-b67"];
+}
+
 @interface PlayerMetalView : NSView
 - (double)edrMax;
 - (double)hdrTargetPeakNits;
@@ -1047,6 +1054,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     jobject _eventSink;
     jmethodID _eventMethod;
     NSString *_lastConfiguredHdrKey;
+    NSNumber *_lastReportedVideoHdr;
     NSString *_requestedHdrMode;
     BOOL _displayPanelOled;
     NSString *_lastResizeRefreshKey;
@@ -1599,6 +1607,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
             // Polling properties alone leaves it permanently "loading", triggering its stall
             // recovery even while libmpv is already decoding and presenting the video.
             NSMutableArray<NSDictionary *> *events = [NSMutableArray array];
+            BOOL resetVideoParams = NO;
             BOOL refreshTracks = !self->_trackNotificationsAvailable;
             for (int count = 0; count < 128; count++) {
                 mpv_event *event = mpv_wait_event(mpv, 0.0);
@@ -1620,6 +1629,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                     }
                     case MPV_EVENT_START_FILE:
                         self->_playbackRestartReported = NO;
+                        resetVideoParams = YES;
                         refreshTracks = YES;
                         break;
                     case MPV_EVENT_PROPERTY_CHANGE:
@@ -1694,6 +1704,18 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
                 for (NSDictionary *event in events) {
                     [self sendPlayerEvent:event[@"type"] value:[event[@"value"] doubleValue]];
                 }
+                if (resetVideoParams) self->_lastReportedVideoHdr = nil;
+                // The shared colour-profile collector keeps unknown sources neutral. Publish
+                // decoded input metadata (not the HDR output mode), including SDR=false, so
+                // Cinematic/Vivid/Custom can actually apply once the transfer is known.
+                // Do not classify missing startup metadata as SDR or repeat the profile each tick.
+                if (gamma.length > 0) {
+                    NSNumber *sourceHdr = @(isHdrVideoTransfer(gamma));
+                    if (![self->_lastReportedVideoHdr isEqualToNumber:sourceHdr]) {
+                        self->_lastReportedVideoHdr = sourceHdr;
+                        [self sendPlayerEvent:@"videoParams" value:sourceHdr.doubleValue];
+                    }
+                }
                 [self updateNowPlayingPosition:position duration:duration paused:paused];
                 [self applyHdrForPolledGamma:gamma primaries:primaries reason:@"sync" force:NO];
                 NSString *script = [NSString stringWithFormat:
@@ -1737,8 +1759,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
 - (void)applyHdrForPolledGamma:(NSString *)gamma primaries:(NSString *)primaries reason:(NSString *)reason force:(BOOL)force {
     if (!_mpv || !_videoView) return;
     NSString *normalizedGamma = [[gamma ?: @"" lowercaseString] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    const bool sourceHdr = [normalizedGamma containsString:@"pq"]
-        || [normalizedGamma containsString:@"2084"] || [normalizedGamma containsString:@"hlg"];
+    const bool sourceHdr = isHdrVideoTransfer(normalizedGamma);
     NSString *modeName = _requestedHdrMode ?: @"Auto";
     MacosHdrMode mode = [modeName isEqualToString:@"AlwaysTonemap"] ? MacosHdrMode::Tonemap
         : [modeName isEqualToString:@"AlwaysPassthrough"] ? MacosHdrMode::Passthrough : MacosHdrMode::Auto;

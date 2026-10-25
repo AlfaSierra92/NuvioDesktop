@@ -6,10 +6,16 @@
 @interface FeatureTestPlayer : MpvWebPlayer
 @property(atomic) int thumbnails;
 @property(atomic) int diagnosticWarnings;
+@property(atomic) int videoParamsEvents;
+@property(atomic) BOOL sourceHdr;
 @end
 @implementation FeatureTestPlayer
 - (void)sendPlayerEvent:(NSString *)type value:(double)value {
     if ([type hasPrefix:@"mpvWarning:"]) self.diagnosticWarnings++;
+    if ([type isEqualToString:@"videoParams"]) {
+        self.videoParamsEvents++;
+        self.sourceHdr = value != 0;
+    }
     [super sendPlayerEvent:type value:value];
 }
 - (void)runJavaScript:(NSString *)script {
@@ -27,6 +33,12 @@ static void pumpFor(double seconds) {
 int main(int argc, const char **argv) {
     assert(argc == 3);
     @autoreleasepool {
+        assert(!isHdrVideoTransfer(@""));
+        assert(!isHdrVideoTransfer(@"bt.1886"));
+        assert(!isHdrVideoTransfer(@"srgb"));
+        for (NSString *transfer in @[@"pq", @"st2084", @"hlg", @"arib-std-b67", @" HLG\n"]) {
+            assert(isHdrVideoTransfer(transfer));
+        }
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 360)
@@ -46,6 +58,26 @@ int main(int argc, const char **argv) {
             javaVm:nullptr eventSink:nullptr eventMethod:nullptr];
         pumpFor(2);
         assert(player.durationMs > 10000);
+        assert(player.videoParamsEvents == 1);
+        assert(!player.sourceHdr);
+        puts("PASS: decoded SDR metadata reaches the shared colour-profile gate");
+        [player setPaused:YES];
+        [player setStringProperty:"contrast" value:@"5"];
+        [player setStringProperty:"brightness" value:@"-4"];
+        [player setStringProperty:"saturation" value:@"15"];
+        [player setStringProperty:"gamma" value:@"-2"];
+        [player forceVideoRedraw];
+        pumpFor(0.5);
+        assert([player doubleProperty:"contrast" fallback:0] == 5);
+        assert([player doubleProperty:"brightness" fallback:0] == -4);
+        assert([player doubleProperty:"saturation" fallback:0] == 15);
+        assert([player doubleProperty:"gamma" fallback:0] == -2);
+        assert(player.videoParamsEvents == 1);
+        puts("PASS: Vivid equalizer values apply while paused without repeating source metadata");
+        for (const char *property : {"contrast", "brightness", "saturation", "gamma"}) {
+            [player setStringProperty:property value:@"0"];
+        }
+        [player setPaused:NO];
         [player requestSeekThumbnail:5000];
         for (int wait = 0; wait < 120 && player.thumbnails == 0; ++wait) pumpFor(0.1);
         assert(player.thumbnails > 0);
