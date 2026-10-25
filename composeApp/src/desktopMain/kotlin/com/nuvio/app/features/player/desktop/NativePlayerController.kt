@@ -26,6 +26,7 @@ import com.nuvio.app.features.player.desktopAudioDialogueChoices
 import com.nuvio.app.features.player.DesktopAnimeMode
 import com.nuvio.app.features.player.DesktopAnimeSessionOverride
 import com.nuvio.app.features.player.DesktopBufferPreset
+import com.nuvio.app.features.player.DesktopStartupBuffer
 import com.nuvio.app.features.player.DesktopColorGrade
 import com.nuvio.app.features.player.desktopColorGrade
 import com.nuvio.app.features.player.presetGrade
@@ -1469,7 +1470,7 @@ internal class NativePlayerController(
             ?: 1f
         val settings = PlayerSettingsRepository.uiState.value
         val customOptionNames = desktopCustomMpvOptionNames(settings.desktopCustomMpvOptions)
-        desktopBufferPresetMpvOptions(preset, DesktopHostOs.current, speed)
+        desktopBufferPresetMpvOptions(preset, DesktopHostOs.current, speed, settings.desktopStartupBuffer)
             .filterNot { (name, _) -> name == "stream-buffer-size" }
             // Live TV's rewind buffer owns the back buffer; the preset would shrink it mid-stream.
             .filterNot { (name, _) ->
@@ -1940,6 +1941,7 @@ internal fun desktopBufferPresetMpvOptions(
     preset: DesktopBufferPreset,
     hostOs: DesktopHostOs,
     playbackSpeed: Float = 1f,
+    startupBuffer: DesktopStartupBuffer = DesktopStartupBuffer.QuarterSecond,
 ): List<Pair<String, String>> {
     val limits = when (hostOs) {
         DesktopHostOs.WINDOWS -> when (preset) {
@@ -1961,8 +1963,8 @@ internal fun desktopBufferPresetMpvOptions(
     }
     val factor = playbackSpeed.coerceAtLeast(1f)
     return listOf(
-        "demuxer-readahead-secs" to (limits.readaheadSeconds * factor).toString(),
-        "cache-secs" to (limits.cacheSeconds * factor).toString(),
+        "demuxer-readahead-secs" to (maxOf(limits.readaheadSeconds.toFloat(), startupBuffer.seconds) * factor).toString(),
+        "cache-secs" to (maxOf(limits.cacheSeconds.toFloat(), startupBuffer.seconds) * factor).toString(),
         "demuxer-max-bytes" to limits.maxBytes,
         "demuxer-max-back-bytes" to limits.maxBackBytes,
         // This is mpv's tiny demuxer/I/O ring buffer, not its media cache. Large values can turn
@@ -1971,7 +1973,7 @@ internal fun desktopBufferPresetMpvOptions(
         "stream-buffer-size" to "1MiB",
         // Media buffered before (re)starting playback. Scale content-time with playback speed so
         // wall-clock startup remains equally quick at faster rates.
-        "cache-pause-wait" to (0.25f * factor).toString(),
+        "cache-pause-wait" to (startupBuffer.seconds * factor).toString(),
     )
 }
 
@@ -2108,6 +2110,7 @@ private fun buildDesktopUserMpvOptions(initialPlaybackSpeed: Float): List<String
                 preset = settings.desktopBufferPreset,
                 hostOs = DesktopHostOs.current,
                 playbackSpeed = initialPlaybackSpeed,
+                startupBuffer = settings.desktopStartupBuffer,
             ).forEach { (name, value) -> add("$name=$value") }
             // Nuvio's stats overlay in place of the built-in one (same script name, so the
             // diagnostics binding still finds it). `scripts`, not `scripts-append`: mpv's option

@@ -136,6 +136,7 @@ internal actual object PlayerSettingsStorage {
     private const val desktopColorBrightnessKey = "desktop_color_brightness"
     private const val desktopColorSaturationKey = "desktop_color_saturation"
     private const val desktopColorGammaKey = "desktop_color_gamma"
+    private const val desktopStartupBufferKey = "desktop_startup_buffer"
     private const val desktopBufferPresetKey = "desktop_buffer_preset"
     private const val desktopRendererApiKey = "desktop_renderer_api"
     private const val desktopPerformanceLoggingKey = "desktop_performance_logging"
@@ -530,6 +531,8 @@ internal actual object PlayerSettingsStorage {
     actual fun saveDesktopColorSaturation(value: Int) = saveInt(desktopColorSaturationKey, value)
     actual fun loadDesktopColorGamma(): Int? = loadInt(desktopColorGammaKey)
     actual fun saveDesktopColorGamma(value: Int) = saveInt(desktopColorGammaKey, value)
+    actual fun loadDesktopStartupBuffer(): String? = loadString(desktopStartupBufferKey)
+    actual fun saveDesktopStartupBuffer(value: String) = saveString(desktopStartupBufferKey, value)
     actual fun loadDesktopBufferPreset(): String? =
         loadString(desktopBufferPresetKey) ?: if (hadExistingDesktopPreferences) DesktopBufferPreset.Resilient.name else null
     actual fun saveDesktopBufferPreset(preset: String) = saveString(desktopBufferPresetKey, preset)

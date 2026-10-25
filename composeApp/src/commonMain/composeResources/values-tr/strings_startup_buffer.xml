@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_playback_startup_buffer">Oynatma öncesi arabellek</string>
+    <string name="settings_playback_startup_buffer_desc">Başlamadan ve arabelleğe alma sonrası devam etmeden önce yüklenecek video. Yüksek değerler beklemeyi artırır.</string>
+    <string name="settings_playback_buffer_quarter_second">0,25 s</string>
+    <string name="settings_playback_buffer_half_second">0,5 s</string>
+    <string name="settings_playback_buffer_seconds">%1$d s</string>
+</resources>

@@ -1505,6 +1505,11 @@ private fun settingsSearchEntries(
                 anchor = SettingsScrollAnchor.BufferPreset,
             ) else null,
             if (isDesktop) PlaybackSearchRow(
+                "startup-buffer",
+                resolve(Res.string.settings_playback_startup_buffer),
+                resolve(Res.string.settings_playback_startup_buffer_desc),
+            ) else null,
+            if (isDesktop) PlaybackSearchRow(
                 "desktop-seek-thumbnails",
                 resolve(Res.string.settings_playback_desktop_seek_thumbnails),
                 resolve(Res.string.settings_playback_desktop_seek_thumbnails_desc),

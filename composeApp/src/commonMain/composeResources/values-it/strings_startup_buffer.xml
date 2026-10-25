@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_playback_startup_buffer">Buffer prima della riproduzione</string>
+    <string name="settings_playback_startup_buffer_desc">Video da precaricare prima dell’avvio e della ripresa dopo il buffering. Valori maggiori aumentano l’attesa.</string>
+    <string name="settings_playback_buffer_quarter_second">0,25 s</string>
+    <string name="settings_playback_buffer_half_second">0,5 s</string>
+    <string name="settings_playback_buffer_seconds">%1$d s</string>
+</resources>

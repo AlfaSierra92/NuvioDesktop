@@ -282,6 +282,17 @@ enum class DesktopHudLayout {
     Official,
 }
 
+/** Seconds of media required before starting or resuming after buffering, at normal speed. */
+enum class DesktopStartupBuffer(val seconds: Float) {
+    QuarterSecond(0.25f),
+    HalfSecond(0.5f),
+    OneSecond(1f),
+    TwoSeconds(2f),
+    ThreeSeconds(3f),
+    FiveSeconds(5f),
+    TenSeconds(10f),
+}
+
 enum class DesktopBufferPreset(val label: String, val description: String) {
     Metered(
         "Metered",

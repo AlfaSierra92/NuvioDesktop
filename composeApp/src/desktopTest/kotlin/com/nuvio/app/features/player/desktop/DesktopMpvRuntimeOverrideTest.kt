@@ -2,6 +2,7 @@ package com.nuvio.app.features.player.desktop
 
 import com.nuvio.app.features.player.DesktopMpvConfigMode
 import com.nuvio.app.features.player.DesktopBufferPreset
+import com.nuvio.app.features.player.DesktopStartupBuffer
 import com.nuvio.app.features.player.shouldEnableDesktopRtxSuperResolution
 import com.nuvio.app.features.player.shouldEnableDesktopRtxTrueHdr
 import com.nuvio.app.features.player.desktopRtxVideoFilter
@@ -15,6 +16,7 @@ class DesktopMpvRuntimeOverrideTest {
     private val reportedOptions = """
         cache=yes
         cache-secs=5
+        cache-pause-wait=6
         demuxer-max-bytes=50M
         demuxer-max-back-bytes=1M
         demuxer-readahead-secs=10
@@ -27,6 +29,7 @@ class DesktopMpvRuntimeOverrideTest {
         listOf(
             "cache",
             "cache-secs",
+            "cache-pause-wait",
             "demuxer-max-bytes",
             "demuxer-max-back-bytes",
             "demuxer-readahead-secs",
@@ -149,6 +152,34 @@ class DesktopMpvRuntimeOverrideTest {
         assertEquals("64MiB", options["demuxer-max-back-bytes"])
         assertEquals("1MiB", options["stream-buffer-size"])
         assertEquals("0.5", options["cache-pause-wait"])
+    }
+
+    @Test
+    fun startupThresholdAppliesToAllPresetsAndDesktopPlatforms() {
+        for (host in listOf(DesktopHostOs.MACOS, DesktopHostOs.WINDOWS)) {
+            for (preset in DesktopBufferPreset.entries) {
+                val options = desktopBufferPresetMpvOptions(
+                    preset, host, startupBuffer = DesktopStartupBuffer.FiveSeconds,
+                ).toMap()
+                assertEquals("5.0", options["cache-pause-wait"], "$host / $preset")
+                assertTrue(options.getValue("cache-secs").toFloat() >= 5f)
+                assertEquals("1MiB", options["stream-buffer-size"])
+            }
+        }
+    }
+
+    @Test
+    fun longestStartupThresholdHasEnoughReadaheadEvenOnMeteredMacAndScalesWithSpeed() {
+        val options = desktopBufferPresetMpvOptions(
+            DesktopBufferPreset.Metered, DesktopHostOs.MACOS,
+            playbackSpeed = 2f, startupBuffer = DesktopStartupBuffer.TenSeconds,
+        ).toMap()
+        assertEquals("20.0", options["cache-pause-wait"])
+        assertEquals("20.0", options["cache-secs"])
+        assertEquals("20.0", options["demuxer-readahead-secs"])
+        // The startup preference must not silently increase the memory or I/O budget.
+        assertEquals("24MiB", options["demuxer-max-bytes"])
+        assertEquals("1MiB", options["stream-buffer-size"])
     }
 
     @Test

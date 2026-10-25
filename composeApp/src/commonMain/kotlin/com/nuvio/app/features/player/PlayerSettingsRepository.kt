@@ -204,6 +204,7 @@ data class PlayerSettingsUiState(
     val desktopColorBrightness: Int = 0,
     val desktopColorSaturation: Int = 0,
     val desktopColorGamma: Int = 0,
+    val desktopStartupBuffer: DesktopStartupBuffer = DesktopStartupBuffer.QuarterSecond,
     val desktopBufferPreset: DesktopBufferPreset = DesktopBufferPreset.Balanced,
     val desktopRendererApi: DesktopRendererApi = DesktopRendererApi.D3D11,
     /** Desktop diagnostics: frame-budget telemetry. Off unless someone is investigating. */
@@ -374,6 +375,7 @@ object PlayerSettingsRepository {
     private var desktopColorBrightness = 0
     private var desktopColorSaturation = 0
     private var desktopColorGamma = 0
+    private var desktopStartupBuffer = DesktopStartupBuffer.QuarterSecond
     private var desktopBufferPreset = DesktopBufferPreset.Balanced
     private var desktopRendererApi = DesktopRendererApi.D3D11
     private var desktopPerformanceLoggingEnabled = false
@@ -522,6 +524,7 @@ object PlayerSettingsRepository {
         desktopColorBrightness = 0
         desktopColorSaturation = 0
         desktopColorGamma = 0
+        desktopStartupBuffer = DesktopStartupBuffer.QuarterSecond
         desktopBufferPreset = DesktopBufferPreset.Balanced
         desktopRendererApi = DesktopRendererApi.D3D11
         desktopPerformanceLoggingEnabled = false
@@ -787,6 +790,9 @@ object PlayerSettingsRepository {
         desktopColorBrightness = PlayerSettingsStorage.loadDesktopColorBrightness() ?: 0
         desktopColorSaturation = PlayerSettingsStorage.loadDesktopColorSaturation() ?: 0
         desktopColorGamma = PlayerSettingsStorage.loadDesktopColorGamma() ?: 0
+        desktopStartupBuffer = PlayerSettingsStorage.loadDesktopStartupBuffer()
+            ?.let { runCatching { DesktopStartupBuffer.valueOf(it) }.getOrNull() }
+            ?: DesktopStartupBuffer.QuarterSecond
         desktopBufferPreset = PlayerSettingsStorage.loadDesktopBufferPreset()
             ?.let { runCatching { DesktopBufferPreset.valueOf(it) }.getOrNull() }
             ?: DesktopBufferPreset.Balanced
@@ -1832,6 +1838,7 @@ object PlayerSettingsRepository {
             desktopColorBrightness = desktopColorBrightness,
             desktopColorSaturation = desktopColorSaturation,
             desktopColorGamma = desktopColorGamma,
+            desktopStartupBuffer = desktopStartupBuffer,
             desktopBufferPreset = desktopBufferPreset,
             desktopRendererApi = desktopRendererApi,
             desktopPerformanceLoggingEnabled = desktopPerformanceLoggingEnabled,
@@ -1935,6 +1942,14 @@ object PlayerSettingsRepository {
         PlayerSettingsStorage.saveDesktopColorBrightness(0)
         PlayerSettingsStorage.saveDesktopColorSaturation(0)
         PlayerSettingsStorage.saveDesktopColorGamma(0)
+    }
+
+    fun setDesktopStartupBuffer(value: DesktopStartupBuffer) {
+        ensureLoaded()
+        if (desktopStartupBuffer == value) return
+        desktopStartupBuffer = value
+        publish()
+        PlayerSettingsStorage.saveDesktopStartupBuffer(value.name)
     }
 
     fun setDesktopBufferPreset(preset: DesktopBufferPreset) {

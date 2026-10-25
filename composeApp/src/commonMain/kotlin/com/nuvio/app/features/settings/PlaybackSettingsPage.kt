@@ -76,6 +76,7 @@ import com.nuvio.app.features.player.desktopAudioDialogueChoices
 import com.nuvio.app.features.player.selectedFor
 import com.nuvio.app.features.player.DESKTOP_COLOR_OFFSET_RANGE
 import com.nuvio.app.features.player.DesktopBufferPreset
+import com.nuvio.app.features.player.DesktopStartupBuffer
 import com.nuvio.app.features.player.DesktopRateLimitRecoveryMode
 import com.nuvio.app.features.player.DesktopSeekThumbnailMode
 import com.nuvio.app.features.player.RATE_LIMIT_RECONNECT_DELAY_VALUES
@@ -1368,6 +1369,23 @@ private fun PlaybackSettingsSection(
                             isTablet = isTablet,
                             modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.BufferPreset),
                             onSelected = PlayerSettingsRepository::setDesktopBufferPreset,
+                        )
+                        SettingsGroupDivider(isTablet = isTablet)
+                        SettingsChoiceRow(
+                            title = stringResource(Res.string.settings_playback_startup_buffer),
+                            description = stringResource(Res.string.settings_playback_startup_buffer_desc),
+                            options = DesktopStartupBuffer.entries.map { value ->
+                                val label = when (value) {
+                                    DesktopStartupBuffer.QuarterSecond -> stringResource(Res.string.settings_playback_buffer_quarter_second)
+                                    DesktopStartupBuffer.HalfSecond -> stringResource(Res.string.settings_playback_buffer_half_second)
+                                    else -> stringResource(Res.string.settings_playback_buffer_seconds, value.seconds.toInt())
+                                }
+                                SettingsChoiceOption(value, label)
+                            },
+                            selectedValue = autoPlayPlayerSettings.desktopStartupBuffer,
+                            isTablet = isTablet,
+                            modifier = Modifier.settingsScrollAnchor(SettingsScrollAnchor.searchKey("startup-buffer")),
+                            onSelected = PlayerSettingsRepository::setDesktopStartupBuffer,
                         )
                         SettingsGroupDivider(isTablet = isTablet)
                         SettingsChoiceRow(

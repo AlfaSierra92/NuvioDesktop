@@ -273,6 +273,8 @@ internal expect object PlayerSettingsStorage {
     fun saveDesktopColorSaturation(value: Int)
     fun loadDesktopColorGamma(): Int?
     fun saveDesktopColorGamma(value: Int)
+    fun loadDesktopStartupBuffer(): String?
+    fun saveDesktopStartupBuffer(value: String)
     fun loadDesktopBufferPreset(): String?
     fun saveDesktopBufferPreset(preset: String)
     fun loadDesktopRendererApi(): String?
