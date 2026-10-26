@@ -52,7 +52,7 @@
 
 ## Testing
 
-<!-- What you tested and how. Include devices/emulators, commands, and manual flows. Do not write only "not tested" unless this is docs/translation-only. -->
+<!-- What you tested and how. Include devices/emulators, commands, and manual flows. For docs-only changes, list link/example/source-reference checks. For runtime tests, record OS/architecture and distinguish unit, synthetic playback and real-device/permission results. -->
 
 ## Screenshots / Video (UI changes only)
 

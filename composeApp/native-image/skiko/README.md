@@ -1,5 +1,7 @@
 # skiko
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 `org.jetbrains.skiko.FrameWatcher`, public methods and fields.
 
 Why: `IdleHeapCollector.start()` (desktopMain `core/ui/IdleHeapCollector.kt`) sets

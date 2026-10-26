@@ -1,12 +1,14 @@
 # native-bridges
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 JDK value classes registered for JNI by the spike: boxed numbers and `Boolean`, `ByteBuffer`,
 `ByteOrder`, `ArrayList`, `HashMap`. The app's own C++ no longer looks any of them up. They stay
 until a QA build shows nothing else reaches them through JNI, and then they go.
 
-The app's real bridge entries are **generated** by `generateNativeMetadata` (plan step 4) from the
+The app's real bridge entries are **generated** by `generateNativeMetadata` from the
 `FindClass` / `GetMethodID` / `GetFieldID` / `ThrowNew` literals in `player_bridge.cpp` and the
-nuvio-engine `jni_bridge.cpp`, into `build/native-image/generated/`. That covers
+nuvio-engine `jni_bridge.cpp`, into `composeApp/build/native-image/generated/` (from the repository root). That covers
 `NativePlayerEventSink`, the `com.nuvio.engine.internal.Native*Payload` classes,
 `IllegalStateException` and `String`. The generator fails the build on any lookup it cannot
 resolve (`GetObjectClass`, an inline expression). That is why the player looks up `onPlayerEvent`

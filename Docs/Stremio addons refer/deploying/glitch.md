@@ -42,7 +42,7 @@ Select "Glitch" and enter your Glitch project Live URL. This will bring you to a
 
 ## 4. Use CloudFlare to cache the addon responses
 
-Go to [CloudFlare](cloudflare.com) and create a new account if you don't have one. Then add a new site with the .ga domain you registered in Step 2, CloudFlare will tell you that it couldn't find any DNS records for it, don't worry, that's fine. Create a new CNAME record with the Name set to `@` and the Target set to what the page from Step 3 shows next to CNAME (it should be a URL that ends with `.shw.io`). Now press "Add Rule" and confirm the changes.
+Go to [CloudFlare](https://cloudflare.com) and create a new account if you don't have one. Then add a new site with the .ga domain you registered in Step 2, CloudFlare will tell you that it couldn't find any DNS records for it, don't worry, that's fine. Create a new CNAME record with the Name set to `@` and the Target set to what the page from Step 3 shows next to CNAME (it should be a URL that ends with `.shw.io`). Now press "Add Rule" and confirm the changes.
 
 This will bring you to a page that tells you to change your domain's nameservers, to do that, go to [Freenom](https://freenom.com) (where you made your .ga domain), log in with the account you used to create your domain, in the top menu press "Services", then "My Domains", then "Manage Domain" next to your domain name, now press "Management Tools", then "Nameservers", press "Use custom nameservers" and paste your CloudFlare nameservers.
 

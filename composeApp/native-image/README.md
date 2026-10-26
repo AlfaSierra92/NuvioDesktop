@@ -1,56 +1,60 @@
-# Native-image build inputs
+# Windows native-image build inputs
 
-Everything the GraalVM native-image build of Nuvio needs besides the app's own jars. Plan and
-background: `Docs/plans/native-image-shipping.md`; spike history:
-`Docs/handoff-2026-10-16-perf-native-memory.md`.
+This directory configures the **Windows GraalVM native executable**. It is not the
+macOS JVM app's permission, signing or native-library configuration. See
+[Development](../../Docs/Development.md#windows-graalvm-native-image),
+[Testing](../../Docs/Testing.md) and the [macOS guide](../../Docs/macOS.md).
+The older spike plans referenced by previous versions of this README are not part
+of this checkout; the current build contract is in
+[`composeApp/build.gradle.kts`](../build.gradle.kts).
 
-| Path | What |
+## Inputs and generated metadata
+
+| Path | Purpose |
 |---|---|
-| `agent/` | Output of the native-image tracing agent (legacy multi-file format). Recorded on JDK 21 during the 2026-10-16 spike; plan step 3 replaces it with a fresh trace on GraalVM 25. Do not hand-edit: re-trace instead. |
-| `<topic>/reachability-metadata.json` | Hand-written entries the trace missed, one directory per reason. Each has a `README.md` saying why it exists, because JSON has no comments. |
-| `nuvio-launcher.manifest` | The jpackage launcher's PerMonitorV2 DPI manifest. Embedded into the native exe with `mt.exe`; without it Windows DPI-virtualises the window (1920x1080 stretched on a 4K screen, broken borderless fullscreen). |
+| `agent/` | Tracing-agent output in the legacy multi-file format. Re-trace when needed rather than hand-editing recorded results. |
+| `<topic>/reachability-metadata.json` | Hand-maintained registrations with a topic README explaining the failure they address. |
+| `nuvio-launcher.manifest` | Windows PerMonitorV2 DPI manifest embedded with the native build tools. |
+| `composeApp/build/native-image/generated/` | Generated metadata, outside this source directory. |
 
-The build passes every directory here to `-H:ConfigurationFileDirectories` (comma-separated),
-plus `build/native-image/generated/`.
+`generateNativeMetadata` runs before `nativeCompile`. It gathers serializer types
+from app jars and the literal JNI lookups in the Windows player and engine bridge.
+Unresolvable C++ lookups fail generation; prefer literal class/member names the
+scanner can understand. `NativeImageReflectionCheckTest` checks reflective app
+lookups against the registered/generated entries and documented exceptions.
 
-**Generated, not here** (plan step 4): `generateNativeMetadata` runs before `nativeCompile` and
-writes `build/native-image/generated/reachability-metadata.json`:
-- every `X$$serializer` in the app jars, as `X`, `X$Companion` and `X$$serializer`, plus
-  `kotlinx.serialization.json`;
-- the JNI lookups literally named in `player_bridge.cpp` and the engine's `jni_bridge.cpp`.
+## Build and validation
 
-The generator fails the build on a C++ lookup it cannot read, so look classes up with
-`FindClass("literal")` into a variable. `NativeImageReflectionCheckTest` fails when Kotlin code
-looks up a class or member by name that has no entry here or in the generated file; its
-`allowed` list holds the exceptions, each with a reason.
+The build requires Windows, GraalVM for JDK 25, MSVC/Windows SDK and the native
+runtime dependencies described in the development guide. It starts from the JVM
+app image, compiles it, then lays out the executable and required resources:
 
-Rules:
-- **No BOM.** Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes one, and native-image then
-  fails with "Error parsing JNI configuration". `NativeImageMetadataTest` checks every file.
-- **Reflection added on purpose names its directory** in a code comment, and the directory's README
-  names the code (example: skiko `FrameWatcher` in `IdleHeapCollector.kt` ↔ `skiko/`).
-- A hand entry stays only while something fails without it. When a fresh trace covers a topic,
-  delete the directory rather than keeping both.
+```powershell
+.\gradlew.bat --no-configuration-cache :composeApp:createNativeDistributable
+.\gradlew.bat --no-configuration-cache :composeApp:nativeSmoke
+.\gradlew.bat --no-configuration-cache :composeApp:packageNativeReleaseZip
+```
 
-Topics (2026-10-17 split of the spike's single `nuvio-config-extra` file; 3,462 types, 16 resource
-entries, nothing changed in the split):
+The app output is `composeApp/build/native-image/Nuvio`; the release ZIP is under
+`composeApp/build/native-image/release`. The interactive `nativeImageTrace` task
+uses the tracing agent. `-Pnuvio.trace.freshProfile=true` selects fresh file-backed
+trace data; it is not a general promise of authentication isolation. QA builds
+use `-Pnuvio.native.qa=true` and are refused by normal release packaging.
 
-| Topic | Types | Resources |
-|---|---|---|
-| `awt-jni/` | 1,158 | |
-| `fonts/` | 124 | |
-| `swing/` | 108 | 4 |
-| `onnxruntime/` | 71 | |
-| `file-dialogs/` | 52 | 1 |
-| `clipboard/` | 39 | 1 |
-| `native-bridges/` | 9 | |
-| `skiko/` | 1 | |
-| `resources/` | | 10 |
+## Topics
 
-Added from the step-3 QA build (2026-10-17): `quickjs/` (LinkedHashMap JNI: every plugin was
-failing), `management/` (13 MXBeans), and entries in `swing/`, `file-dialogs/`, `awt-jni/`.
+- [AWT/JNI](awt-jni/README.md), [fonts](fonts/README.md), [Swing](swing/README.md)
+- [File dialogs](file-dialogs/README.md), [clipboard](clipboard/README.md)
+- [Native bridges](native-bridges/README.md), [QuickJS](quickjs/README.md)
+- [ONNX Runtime](onnxruntime/README.md), [Skiko](skiko/README.md)
+- [Management](management/README.md), [resources](resources/README.md)
 
-Step 4 (2026-10-17): `serialization/` (1,893) was deleted, because generation produces the identical
-set. `native-bridges/` lost its app classes to generation. `quickjs/` did not fix plugins (they
-were fixed in `PluginRuntime.kt` by never handing JS objects to Java) and can go after the next QA
-round.
+The topic notes preserve historical failure evidence. Type/resource counts are
+not fixed contracts: inspect the JSON and generated output rather than copying
+numbers from an old trace. Retain an entry until a fresh trace/QA run demonstrates
+it is unnecessary; do not remove platform metadata because a macOS JVM test passes.
+
+Save metadata without a BOM. Windows PowerShell 5.1's UTF-8 output can introduce
+one and break parsing; `NativeImageMetadataTest` checks these files. Keep changes
+attributable to a concrete reflection/JNI/resource requirement and update the
+corresponding rationale when it changes.

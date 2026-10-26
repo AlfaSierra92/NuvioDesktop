@@ -2,7 +2,7 @@
 
 Used as a response for [`defineMetaHandler`](../requests/defineMetaHandler.md)
 
-``id`` - **required** - string, universal identifier; you may use a [prefix](./manifest.md##filtering-properties) unique to your addon, for example `yt_id:UCrDkAvwZum-UTjHmzDI2iIw`
+``id`` - **required** - string, universal identifier; you may use a [prefix](./manifest.md#filtering-properties) unique to your addon, for example `yt_id:UCrDkAvwZum-UTjHmzDI2iIw`
 
 ``type`` - **required** - string, type of the content; e.g. `movie`, `series`, `channel`, `tv` (see [Content Types](./content.types.md))
 
@@ -114,7 +114,7 @@ This is a shorter variant of the previously described [Meta Object](#meta-object
 
 Used as a response for [`defineCatalogHandler`](../requests/defineCatalogHandler.md)
 
-``id`` - **required** - string, universal identifier; you may use a [prefix](./manifest.md##filtering-properties) unique to your addon, for example `yt_id:UCrDkAvwZum-UTjHmzDI2iIw`
+``id`` - **required** - string, universal identifier; you may use a [prefix](./manifest.md#filtering-properties) unique to your addon, for example `yt_id:UCrDkAvwZum-UTjHmzDI2iIw`
 
 ``type`` - **required** - string, type of the content; e.g. `movie`, `series`, `channel`, `tv` (see [Content Types](./content.types.md))
 

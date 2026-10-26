@@ -1,3 +1,9 @@
+# Design concept prompts
+
+These prompts are historical visual exploration inputs, not a specification of
+implemented controls or supported platforms. For current behavior and setup,
+see the [project documentation](../Docs/README.md).
+
 # Visual polish concepts
 
 Generated using the built-in image generation tool. Source-image access failed, so these are newly generated concepts based on the screenshot descriptions, not pixel-preserving edits. App code is unchanged.

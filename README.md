@@ -1,480 +1,171 @@
 <div align="center">
-
-  <img src="https://github.com/tapframe/NuvioTV/blob/main/assets/brand/app_logo_wordmark.png" alt="Nuvio" width="300" />
-  <br />
-  <br />
-
-  [![License][license-shield]][license-url]
-
-  <p>
-    Nuvio HTPC (Home Theatre PC) is a feature rich desktop media client for Windows and macOS, for either desk or couch.
-    <br>To see it in action, click the image for a showcase video.<br/>
-  </p> 
+  <img src="composeApp/src/desktopMain/resources/icons/nuvio-app-icon.png" alt="Nuvio HTPC" width="96" />
+  <h1>Nuvio HTPC</h1>
+  <p>A desktop media client for Windows and macOS, for desk and couch.</p>
 </div>
+
+Nuvio HTPC is an independent fork of [Nuvio Desktop](https://github.com/NuvioMedia/NuvioDesktop).
+It browses metadata, manages libraries and watch progress, and plays media from
+user-installed extensions, local folders and user-provided sources. This fork is
+not affiliated with the original Nuvio team.
+
+[Documentation](Docs/README.md) · [macOS guide](Docs/macOS.md) ·
+[Configuration](Docs/Configuration.md) · [Development](Docs/Development.md) ·
+[Testing](Docs/Testing.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 [![Nuvio TV Mode Demo](https://img.youtube.com/vi/txiM8_y2aD8/maxresdefault.jpg)](https://youtu.be/txiM8_y2aD8)
 
-This fork is unaffiliated with the Nuvio team. Don't worry about the commit disparity, Nuvio's team makes many small commits while I bundle everything into a single release commit for simplicity as this is mostly a solo focused project. 
+## Installation and platform support
 
-If you're a Linux user check out [Slokker's Linux Fork.](https://github.com/iamSlokker/NuvioDesktop-Linux) It supports appimage, flatpack or debian. It's based on the nightly releases of this project.
+Use this fork's [releases](https://github.com/AlfaSierra92/NuvioDesktop/releases)
+and [macOS workflow artifacts](https://github.com/AlfaSierra92/NuvioDesktop/actions/workflows/release-macos.yml)
+when available. Packages from the original Nuvio repository are a different app
+and do not necessarily contain this fork's fixes.
 
-## macOS support
+| Platform | Packaging and status |
+|---|---|
+| Windows | JVM application/MSI and a separate GraalVM native executable/ZIP build path. Native-image tooling requires Windows. |
+| macOS Apple Silicon | JVM `.app` and `.dmg` with the Objective-C++/libmpv player and bundled native libraries. Local and loopback HTTP playback have been exercised. |
+| macOS Intel | The build follows the host JDK architecture; Intel has not been verified. Universal binaries are not generated. |
+| Linux | Gradle has a DEB target, but this repository does not establish full Linux feature parity. See the separate [Linux fork](https://github.com/iamSlokker/NuvioDesktop-Linux). |
 
-This fork includes initial macOS support under the app name **Nuvio HTPC**, with
-`.app` and `.dmg` packaging. Building and local video playback have been verified
-on Apple Silicon. Intel builds use the host JDK's architecture but have not yet
-been verified; universal binaries are not generated.
+For a macOS DMG, quit older copies, open the image and copy **Nuvio HTPC.app** to
+Applications. Homebrew is needed to build the app, not to run its bundled player.
+Local builds use ad hoc signing unless a signing identity is configured; Developer
+ID signing and notarization are separate steps. See the [macOS guide](Docs/macOS.md).
 
-The macOS port includes:
+## Features
 
-- Metal rendering for the Compose interface, without forcing the Windows Direct3D backend.
-- The native Objective-C++/libmpv player with playback properties, volume/mute,
-  subtitle styling and track selection, JavaScript controls, and video redraw support.
-- Delivery of libmpv's file-loaded and first-playback events to the shared player.
-  This fixes playback being treated as permanently loading and repeatedly reopened.
-- Native macOS scrolling for the home and horizontal lists, preserving trackpad
-  and Magic Mouse deltas instead of applying mouse-wheel multipliers and extra easing.
-- Bundling and relocation of the player's non-system libraries, so Homebrew is
-  required on the build machine rather than the machine running the packaged app.
-- Preservation of ONNX Runtime's macOS libraries in the packaged application.
-- Coordinated HDR mode changes: libmpv output and the macOS layer use matching
-  color encodings, and returning to Auto resets the managed HDR/SDR properties.
-- Local seek thumbnails, audio-referenced subtitle sync, AutoCrop and macOS Now Playing.
-- GameController input, compact PiP window interactions, external mpv/VLC discovery
-  and mpv progress tracking over Unix sockets.
-- Native game bundles and Unix executables in Game Mode, native ffmpeg/ffprobe
-  discovery for casting, and `nuvio://` links registered in the app bundle.
-- The patched QuickJS runtime and optional native Nuvio Engine build for macOS.
+### Home theatre and navigation
 
-Direct3D, NVIDIA RTX Video and XInput remain Windows integrations; macOS uses its
-own rendering and GameController backends. SVP on macOS requires an external
-VapourSynth/SVP installation and a compatible libmpv build; its proprietary
-runtime is not bundled.
-Network streams, large home catalogs, and all playback options have not been
-exhaustively tested. See [Build on macOS](#build-on-macos) for setup and validation.
+- Mouse, keyboard and controller navigation, TV Mode and fullscreen browsing.
+- Game Mode with a game library and platform-specific executable/application launching.
+- IPTV from an Xtream Codes or M3U provider, optional XMLTV guide, favourites,
+  programme guide, channel switching and rewind controls. No channels are supplied.
+- Smart-light integrations, idle dimming, optional automatic shutdown and display
+  keep-awake during playback.
+- Casting, including DLNA device playback; device and format compatibility vary.
 
-On macOS, normal settings live in `~/Library/Application Support/NuvioHTPC`.
-Portable mode keeps them in `Nuvio HTPC.portable/data` beside `Nuvio HTPC.app`,
-outside the application bundle. Enable it in Settings > Account from a writable
-location. When moving a portable installation, move the `.app` and its matching
-`.portable` folder together. Disabling portable mode copies the settings back to
-Application Support and retains the previous portable data as
-`Nuvio HTPC.portable/data.old`. Changing mode, switching accounts and importing
-settings restart the packaged app after its current process has closed.
+### Discovery and metadata
 
-# Home Theatre features
+- Adaptive heroes, trailers, metadata badges, configurable artwork and custom rows.
+- Discovery from watch history, favourites, unfinished titles and custom criteria.
+- Optional AI discovery with user-configured services.
+- Calendars, random play, anime ID mappings and metadata enrichment.
+- TMDB, TVDB, SIMKL, Trakt, MDBList and other integrations where configured.
 
-* Mouse, keyboard or controller friendly TV Mode with full-screen navigation, adaptive hero, row-jump navigation, cast and award information. This applies across all panels, not just home.
-* Game Mode for browsing and launching your game library alongside your media.
-* IPTV from your own provider (Xtream Codes or M3U) with a programme guide, favourites and an in-player channel switcher, based on Slokker's GoatTV (used with Permission).
-* Automatic control of smart lights based on playback state for a theater like experience.
-* Automatic dim and shutdown for OLED displays.
-* Audio pass-through features for a receiver.
-* Casting to another device, if the TV is busy you can cast to your phone or laptop.
+### Library and downloads
 
-# Discovery & Browsing
+- Local movie/series folders with automatic matching and manual corrections.
+- Monitored downloads with schedules, concurrency and bandwidth controls.
+- Debrid/cloud library integration, cached-source inspection and season-pack selection.
+- Per-account settings plus machine-wide libraries and services; see
+  [data locations and account boundaries](Docs/Configuration.md#data-locations-and-accounts).
 
-* Adaptive hero screens with trailers, configurable artwork, metadata badges, and multiple background modes.
-* Discover built around your watch history, favorites, unfinished titles, hidden gems, trending content, and fully custom rows.
-* Custom discovery queries can filter by genre, rating, votes, release status, language, certification, runtime, year, studio, cast, and crew.
-* Optional AI-powered discovery using OpenAI, Anthropic, OpenRouter, etc.
-* Built in calendar for Nuvio, Trakt, Mdblist and SIMKL.
-* Random play content or episode based on your criteria.
+### Playback
 
-# Library & Downloads
+- libmpv player with custom options, buffering presets, source failover and playlists.
+- Chapters, intro/outro skipping, dual subtitles, subtitle styling and synchronization.
+- Seek thumbnails, AutoCrop, playback speed, volume boost and Picture-in-Picture.
+- Direct URLs, local files, external players, watch-progress tracking and next episodes.
+- HDR modes, colour profiles and anime shaders. NVIDIA RTX Video and Direct3D are
+  Windows integrations. SVP requires a compatible external installation on macOS.
+- Stream scoring based on quality, language, codec, cache status and other metadata.
 
-* Local Library for movies and TV from PC folders, with automatic TMDB matching and manual fix-matching.
-* Auto-Downloads for monitored movies and series with configurable delays, schedules, limits, concurrency, and bandwidth controls.
-* Debrid library integration with TorBox and Premiumize, including season-pack inspection, episode selection, cached-source inspection, and cloud libraries.
+### Customization
 
-# Desktop Playback
+Themes, fonts, keyboard shortcuts, UI scale, settings favourites, artwork, badges,
+provider preferences and player controls are configurable. Custom hero rules and
+badge images are documented in [Configuration](Docs/Configuration.md#custom-hero-discovery-and-badges).
+The design draws inspiration from Nuvio TV and Stremio Kai. IPTV builds on Slokker's
+GoatTV; the corresponding features were incorporated with permission.
 
-* MPV-based desktop player with extensive customization options built in, as well as the option to fully overwrite the MPV config.
-* Multiple playback UIs to choose from, with a extensive right click menu, cast display and clock.
-* Automatic stream failover, source affinity, binge mode, next-episode autoplay, and configurable buffering.
-* Three color profiles thanks to Stremio Kai (used with Permission), custom color profile for tinkering and three HDR modes.
-* Anime shaders (4K Anime, Stremio Kai, custom), SVP frame interpolation and NVIDIA RTX Video True HDR.
-* Seek-bar thumbnails, chapters, SkipDB support, intro/outro skipping, dual subtitles, extensive subtitle styling, playback speed controls, and volume boost.
-* Desktop Picture-in-Picture, direct URL playback, local-file playback, and external-player integration.
-* Stream Scoring can rank or reject sources based on quality, resolution, HDR, audio, codec, language, release metadata, cache status, and file size.
+## macOS permissions and coexistence
 
-# Tracking & Metadata
+The fork uses bundle ID `com.nuvio.htpc.desktop`, URL scheme `nuviohtpc://`, and
+`~/Library/Application Support/NuvioHTPC` for ordinary file-backed data. Temporary
+player resources use HTPC-specific names. It no longer deletes binaries from the
+original app's temporary TorrServer directory.
 
-* SIMKL, MDBList, and self-hosted Floppy/Yamtrack integrations with watch history, ratings, Calendar, Continue Watching, and multi scrobbling.
-* Extensive anime metadata support across IMDb, MyAnimeList, Kitsu, AniDB, AniList, SIMKL, TMDB, and TVDB.
-* Automatic anime numbering/matching through a bundled Fribb mapping database.
-* Filename-only resolution for debrid and cloud libraries, turning raw files into properly identified titles and artwork.
-* State based external player tracking support for MPV, MPC, VLC and process based tracking for PotPlayer/Energy.
+The package declares local-network, protected-folder, network/removable-volume
+and Apple Events usage descriptions. Native open/save panels cover folders,
+backup/import, catalog import/export, game applications, external players and
+subtitle saves. macOS owns the consent decision; previously denied access may
+need to be enabled in System Settings. See [permissions](Docs/macOS.md#permissions).
 
-# Customisation
-
-* Custom hero discovery rules and metadata badges without modifying the application.
-* Custom themes, accent gradients, system fonts, poster layouts, detail-page backgrounds, keyboard shortcuts, settings navigation, and player HUD scaling.
-* Configurable provider preferences, source scoring, subtitle/audio filtering, playback behaviour, and discovery rows.
-
-# Other
-
-* The settings menu has been fully redesigned to function like a desktop client rather than mobile.
-* Full hotkey remapping.
-* Display expected quality in the hero via QualiCache.
-* Application and player UI scaling sliders.
-* Change the font of the application to any installed font.
-
-The design of Nuvio HTPC is partly inspired by Nuvio TV and Stremio Kai. 
-
-## Custom Hero Discovery Config & Badges
-
-Nuvio HTPC can show hero info badges for awards, festivals, critic signals, release status, language, notable studios/directors, trending/cult/true-story metadata, short films, mini series, binge-ready shows, and new releases.
-
-You can extend the studio/director list and override the bundled badge images without touching the code. Create this folder first:
-
-```text
-%LOCALAPPDATA%\NuvioHTPC\Badges
-```
-
-For most Windows users this expands to:
-
-```text
-C:\Users\<you>\AppData\Local\NuvioHTPC\Badges
-```
-
-### Custom `hero_discovery.json`
-
-Place a file named `hero_discovery.json` in `%LOCALAPPDATA%\NuvioHTPC\Badges`.
-
-Example:
-
-```json
-{
-  "version": 1,
-  "mergeWithDefaults": true,
-  "studios": {
-    "Janus Films": "Janus Films",
-    "Toho": "Toho"
-  },
-  "directors": {
-    "Akira Kurosawa": "A. Kurosawa",
-    "Kelly Reichardt": "Kelly Reichardt"
-  }
-}
-```
-
-- `mergeWithDefaults: true` keeps the built-in studios/directors and adds yours.
-- `mergeWithDefaults: false` replaces the built-in studio/director lists with only your entries.
-- The left side must match the studio or director name from the title metadata.
-- The right side is the short label shown in the hero badge/tooltip.
-- Restart Nuvio after changing this file.
-
-### Custom Badge Images
-
-Put image files directly in `%LOCALAPPDATA%\Nuvio\Badges`. Supported formats:
-
-```text
-.png
-.jpg
-.jpeg
-.webp
-```
-
-Custom badge filenames are matched case-insensitively and ignore spaces/punctuation. For example, all of these can match the Metacritic badge:
-
-```text
-Metacritic.png
-Must See.webp
-must-see.jpg
-```
-
-Useful badge names/categories include:
-
-```text
-Best Picture.png
-Best Picture Nominee.png
-Golden Globe.png
-Golden Globe Nominee.png
-Emmy Winner.png
-Emmy Nominee.png
-Palme dOr.png
-Golden Lion.png
-Golden Bear.png
-Peoples Choice.png
-Metacritic.png
-Must See.png
-Cult Classic.png
-Trending.png
-Short Film.png
-Mini Series.png
-Binge Ready.png
-True Story.png
-New Release.png
-Director.png
-Studio.png
-```
-
-For director badges, you can also use the director name itself, such as:
-
-```text
-David Fincher.png
-Christopher Nolan.webp
-```
-
-The custom image wins over the bundled default whenever its filename matches the badge label or category. Restart Nuvio after adding or replacing custom badge files.
-
-This concludes the forks readme, anything beyond this point is from the official upstream Nuvio Desktop.
-
-## Upstream - About
-
-Nuvio Desktop is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
-
-## Upstream - Installation
-
-Download the latest desktop build from [GitHub Releases](https://github.com/NuvioMedia/NuvioDesktop/releases/latest).
-
-Release packages are provided for supported desktop platforms:
-
-- Windows: MSI installer
-- macOS: DMG installer
-- Linux: DEB package, when available
-
-## Upstream - Development
-
-```bash
-git clone https://github.com/NuvioMedia/NuvioDesktop.git
-cd NuvioDesktop
-```
-
-Run from source:
-
-```bash
-./gradlew :composeApp:run
-```
-
-On Windows PowerShell:
-
-```powershell
-.\gradlew.bat :composeApp:run
-```
-
-Build a release package for the current host:
-
-```bash
-./gradlew :composeApp:packageReleaseDistributionForCurrentOS
-```
-
-Platform-specific packaging:
-
-```bash
-# Windows
-./gradlew :composeApp:packageReleaseMsi --rerun-tasks
-
-# macOS
-./gradlew :composeApp:packageReleaseDmg
-
-# Linux
-./gradlew :composeApp:packageReleaseDeb
-```
+The bundle/data separation does **not** establish complete login-session isolation:
+Supabase currently uses its default desktop session manager outside the file-backed
+data directory. The [configuration guide](Docs/Configuration.md#authentication-and-coexistence)
+explains that remaining boundary.
 
 ## Build on macOS
 
-Use a native JDK 21 for your Mac's architecture (Apple Silicon or Intel), Xcode
-Command Line Tools, Homebrew, and Python 3 (provided by the Command Line Tools).
-Builds target the architecture of the JDK running Gradle; they are not universal binaries.
+Use a native JDK 21, Xcode Command Line Tools, Homebrew, Python 3, `mpv` and
+`pkg-config`. Run from the repository root:
 
 ```bash
-xcode-select --install  # only if Command Line Tools are not installed
 brew install mpv pkg-config
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+./gradlew --no-configuration-cache :composeApp:run
 
-# Run from source
-./gradlew :composeApp:run
-
-# Create a local .app, or a release DMG
-./gradlew :composeApp:createReleaseDistributable
-./gradlew :composeApp:packageReleaseDmg
+# Create a development .app or a release DMG
+./gradlew --no-configuration-cache :composeApp:createDistributable
+./gradlew --no-configuration-cache :composeApp:packageReleaseDmg
 ```
 
-The app is written to `composeApp/build/compose/binaries/main-release/app/Nuvio HTPC.app`;
-DMGs are written under `composeApp/build/compose/binaries/main-release/dmg/`.
-The build compiles the Objective-C++ player bridge, copies libmpv and its linked
-non-system libraries into the app, and rewrites their loader paths. Homebrew is
-needed on the build machine. An existing MPVKit build is also supported via
-`-Pnuvio.mpvkit.dir=/absolute/path/to/MPVKit`.
+The development app is written to
+`composeApp/build/compose/binaries/main/app/Nuvio HTPC.app`. The release app is in
+`composeApp/build/compose/binaries/main-release/app/`; release DMGs are under
+`composeApp/build/compose/binaries/main-release/dmg/`.
 
-To install a local build, open its DMG and copy `Nuvio HTPC.app` into Applications.
-Quit an older copy before replacing it. The app's name in Finder and the Dock is
-**Nuvio HTPC**.
+The [macOS guide](Docs/macOS.md) covers the optional Nuvio Engine, MPVKit, signing,
+notarization and troubleshooting. The [development guide](Docs/Development.md)
+covers Windows, service configuration, native builds and release workflow details.
+`--no-configuration-cache` avoids known incompatibilities in the current custom tasks.
 
-### Service configuration and existing installations
+## Verification and troubleshooting
 
-`local.properties` is optional for compilation. A checkout without it builds with
-empty service configuration. In particular, email/password login and account sync
-require the correct backend configuration:
-
-```properties
-SUPABASE_URL=https://your-backend.example
-SUPABASE_ANON_KEY=your-backend-public-key
-```
-
-These are backend settings, not your account's email or password. An existing
-official Nuvio account requires the matching backend; an independent backend has
-separate accounts. Rebuild after changing `local.properties`. Other integrations
-also require their corresponding service settings.
-
-Local settings live in `~/Library/Application Support/NuvioHTPC`. When that folder
-does not exist, the app copies existing data from
-`~/Library/Application Support/Nuvio` once. Later changes to the official app's
-local settings are not automatically copied again. Authentication uses Supabase's
-default session storage, so a different app display name alone does not guarantee
-isolated login sessions.
-
-### Signing and notarization
-
-Distribution signing and notarization are optional. The build accepts these
-settings through Gradle properties, environment variables, or `local.properties`:
-
-- `NUVIO_MACOS_SIGNING_IDENTITY`
-- `NUVIO_MACOS_NOTARY_APPLE_ID`
-- `NUVIO_MACOS_NOTARY_TEAM_ID`
-- `NUVIO_MACOS_NOTARY_PASSWORD`
-
-Local builds without these settings are not Developer ID signed or Apple notarized.
-Copied player libraries receive ad-hoc signatures after their loader paths are
-rewritten, as required for loading them on Apple Silicon. After native staging and
-jar processing, the build signs the finished bundle again (using the configured
-identity, or ad hoc for local builds) and verifies it with `codesign --verify --deep --strict`.
-
-The macOS bundle has its own identity (`com.nuvio.htpc.desktop`) and URL scheme
-(`nuviohtpc://`), so it can coexist with the original Nuvio. Its data stays in
-`~/Library/Application Support/NuvioHTPC`; upstream data is not imported automatically
-unless the old directory contains stores specific to this fork. Temporary player
-files also use HTPC-specific directories, and this fork does not delete binaries
-from the original app’s temporary TorrServer directory.
-
-On first access to a LAN server (for example `http://192.168.1.10:8096/`), allow
-**Local Network** access for **Nuvio HTPC**. Native macOS open/save
-panels cover media/game folders, game and external-player applications, settings
-backup/import, catalog import/export and subtitle saves. Select the resource there
-to authorize access. File dialogs run on the UI thread and restore folder-picker
-mode after use, including cancellation. The bundle
-includes usage descriptions for protected folders, network volumes and removable
-volumes. The Automation entitlement and description cover the optional idle-shutdown
-request; it is sent only after its enabled countdown expires. DLNA casting uses the
-local-network permission. Media decoding, thumbnails, subtitle synchronization and
-GameController input do not use microphone or screen capture APIs. If access was
-denied earlier, enable it in System Settings > Privacy & Security > Local Network or Files & Folders, then retry. These permissions must be
-validated from the packaged `.app`; running via Terminal/Gradle has a different
-privacy identity. Apple recommends an Apple-issued signing identity for reliable
-local-network permission tracking across builds (see
-[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)).
-
-### macOS validation
-
-The native feature harness generates a local video with black bars and audio,
-opens a temporary test window, and checks PiP style restoration, seek thumbnails,
-audio samples, AutoCrop and Now Playing cleanup:
+A strict local HTTP regression verifies intact headers and actual playback,
+including redirects and an optional run of the packaged app:
 
 ```bash
-sh scripts/test-macos-player-features.sh
+python3 scripts/test-macos-http-headers.py \
+  --app "composeApp/build/compose/binaries/main/app/Nuvio HTPC.app"
 ```
 
-The HTTP regression harness starts a strict loopback server, checks that browser
-User-Agents and other headers retain commas/backslashes, and verifies that native
-playback loads and advances both directly and after a redirect. The optional
-`--app` also tests the packaged app with a temporary profile:
+Other targeted tests, the native feature harness, HDR/PiP smoke checks, log locations
+and the limits of loopback testing are in [Testing](Docs/Testing.md) and the
+[macOS troubleshooting guide](Docs/macOS.md#troubleshooting).
+
+An HTTP `400 Bad Request` is a server response, not proof of a denied network
+permission. The macOS bridge now passes headers as a native libmpv list, preserving
+commas in browser User-Agents and literal backslashes. This fix was verified with a
+strict test server; any particular provider or NAS still needs its own end-to-end test.
+
+## Project layout and versions
+
+- `composeApp/src/commonMain/`: shared UI, features, repositories and protocols.
+- `composeApp/src/desktopMain/`: desktop Kotlin, native bridges and resources.
+- `composeApp/src/desktopTest/`: desktop tests and native harnesses.
+- `composeApp/Configuration/DesktopVersion.properties`: desktop version/build code.
+- `composeApp/native-image/`: Windows GraalVM reachability metadata and rationale.
+- `scripts/`: build helpers and playback validation.
+- `Docs/`: maintained guides, port status and external protocol references.
+
+Read the current version from the version file or run:
 
 ```bash
-python3 scripts/test-macos-http-headers.py --app "composeApp/build/compose/binaries/main/app/Nuvio HTPC.app"
-```
-
-External mpv tracking, executable discovery, Game Mode and path handling also have
-desktop regression tests. Gamepad polling is implemented with GameController;
-testing physical controllers and receiver-specific behaviour still requires the
-corresponding hardware.
-
-For the optional native P2P backend, see
-[the engine build instructions](composeApp/src/desktopMain/native/nuvio-engine/README.md).
-Its dependencies are relocated into a separate `Contents/app/native/engine`
-directory. Without an engine build, TorrServer remains the fallback.
-
-For SVP, follow the [official macOS setup](https://www.svp-team.com/docs/mac/).
-Keep SVP Manager running. Nuvio detects available plugin/core locations, or accepts
-`-Dnuvio.svp.pluginDir=/path/to/plugins` (`NUVIO_SVP_PLUGIN_DIR`) and
-`-Dnuvio.svp.script=/path/to/configured-script.vpy`. The SVP controls appear only
-when the required external runtime is detected. No SVP plugin is installed or
-downloaded automatically.
-
-Run the JNI, bundle-layout, and native-scroll regression tests:
-
-```bash
-./gradlew :composeApp:desktopTest \
-  --tests '*MacosPlayerJniTest' \
-  --tests '*NativeRuntimeLayoutTest' \
-  --tests '*MacosNativeScrollTest'
-```
-
-After building the release app, test real playback with a local video at least
-40 seconds long:
-
-```bash
-python3 scripts/smoke-macos-player.py /path/to/local/video.mp4
-
-# Also cycle Tonemap / Passthrough / Auto three times and verify output encoding
-python3 scripts/smoke-macos-player.py /path/to/local/video.mp4 --hdr-cycle
-```
-
-This opens the packaged app for 30 seconds with temporary app data, then closes
-the test process. It checks that the player is created once, lifecycle events
-arrive, the playhead advances without jumping backwards, and no missing JNI
-methods or player errors are reported. It prints the location of the test logs.
-This check covers local playback; it does not validate provider-specific network
-streams or measure frame rates while browsing a real catalog.
-
-## Upstream - Project Structure
-
-- `composeApp/` contains the app code.
-- `composeApp/src/commonMain/` contains shared UI, features, repositories, and platform-agnostic logic.
-- `composeApp/src/desktopMain/` contains desktop-specific integrations.
-- `composeApp/Configuration/DesktopVersion.properties` contains the desktop release version and build code.
-
-## Upstream - Versioning
-
-Desktop versions are set in `composeApp/Configuration/DesktopVersion.properties`.
-
-```properties
-VERSION_NAME=0.1.1-alpha
-VERSION_CODE=1
-```
-
-Use the version helper when changing desktop release versions:
-
-```bash
-./scripts/set-version.sh --desktop 0.1.2-alpha --desktop-code 2
 ./scripts/set-version.sh --show
 ```
 
-## Upstream - Legal & DMCA
+Do not infer the installed version from an example command or an unreleased entry.
+See [versioning](Docs/Development.md#versioning-and-releases) before changing it.
 
-Nuvio functions solely as a client-side interface for browsing metadata and playing media provided by user-installed extensions and/or user-provided sources. It is intended for content the user owns or is otherwise authorized to access.
+## License and media sources
 
-Nuvio is not affiliated with any third-party extensions, catalogs, sources, or content providers. It does not host, store, or distribute any media content.
-
-For comprehensive legal information, including our full disclaimer, third-party extension policy, and DMCA/Copyright information, please visit our [Legal & Disclaimer Page](https://nuvioapp.space/legal).
-
-## Upstream - Built With
-
-- Kotlin Multiplatform
-- Compose Multiplatform
-- Kotlin
-- Compose Desktop packaging
-- Native desktop player integrations
-
-<!-- MARKDOWN LINKS & IMAGES -->
-[contributors-shield]: https://img.shields.io/github/contributors/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[contributors-url]: https://github.com/NuvioMedia/NuvioDesktop/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[forks-url]: https://github.com/NuvioMedia/NuvioDesktop/network/members
-[stars-shield]: https://img.shields.io/github/stars/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[stars-url]: https://github.com/NuvioMedia/NuvioDesktop/stargazers
-[issues-shield]: https://img.shields.io/github/issues/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[issues-url]: https://github.com/NuvioMedia/NuvioDesktop/issues
-[license-shield]: https://img.shields.io/github/license/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[license-url]: https://github.com/NuvioMedia/NuvioDesktop/blob/main/LICENSE
+The repository is distributed under [GPL-3.0](LICENSE), with separate notices for
+bundled third-party components. Nuvio HTPC is a client; users provide their own
+sources and are responsible for having permission to access the media. It does not
+supply a media catalogue of playable content or operate a media hosting service.
+Upstream's [legal page](https://nuvioapp.space/legal) describes the original project;
+it is not a statement of affiliation with this fork.

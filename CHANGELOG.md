@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- macOS purpose descriptions for local networking, protected folders, network/removable volumes and the optional shutdown Apple Event, with native open/save panels covering media/game folders, applications, backups, catalog import/export and subtitle saves.
+- Strict HTTP regression harness and optional packaged-app playback test, covering headers containing commas/backslashes, direct media and redirects. The playback smoke script also accepts HTTP(S) URLs.
+- A documentation index and maintained guides for macOS, configuration, development and testing, with explicit platform/validation limits.
+
+### Fixed
+
+- macOS playback could send malformed HTTP headers when a value contained a comma, including the default browser User-Agent, and strict servers could respond with `400 Bad Request`. Playback and probe connections now pass headers as a native libmpv list.
+- The fork now registers `nuviohtpc://` and uses macOS bundle ID `com.nuvio.htpc.desktop`; generated application links use the fork's scheme. The shared parser retains legacy-link compatibility.
+- macOS/Linux legacy-data migration only considers directories containing fork-specific stores. Temporary player resources use HTPC-specific names, and startup no longer deletes original Nuvio's temporary TorrServer binaries.
+- macOS packaging now signs and verifies the finished bundle after native staging, jar processing and build-info writes, rather than leaving those post-signing writes unsealed.
+- Native macOS file dialogs select `.app` bundles and restore dialog-mode flags after use. Denied shutdown Automation access now has actionable error guidance. Windows game paths produce a readable display name on macOS too.
+
+### Documentation
+
+- Removed conflicting upstream installation instructions, stale `nuvio://` registration claims, unconditional macOS migration claims, workstation-specific audit links and missing-plan references.
+- Documented that bundle/file-data separation does not guarantee independent Supabase login sessions, and that loopback tests and ad hoc signature checks do not prove Finder consent behavior, Developer ID signing or notarization.
+
+Historical release entries below retain their original platform context.
+
 ## 1.16.0 - 2026-10-23
 
 ### Added

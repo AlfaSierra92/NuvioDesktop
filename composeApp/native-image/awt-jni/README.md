@@ -1,5 +1,7 @@
 # awt-jni
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 `java.awt.*` (event, image, peer, dnd, geom), `sun.awt.*` (windows, image, im), `sun.java2d.*`
 (windows, loops, pipe, d3d, opengl), all JNI-accessible.
 
@@ -13,5 +15,5 @@ Also `SwingInteropViewGroup` and `NativePlayerHost` with their declared methods 
 JNI): AWT checks reflectively whether a component subclass overrides `coalesceEvents`. Neither
 does, so the answer was right without the entry, but the QA build reported the lookup (2026-10-17).
 
-Could shrink after a GraalVM 25 trace, which plan step 3 no longer does; leave it unless something
-proves an entry unnecessary.
+A fresh GraalVM 25 trace/QA run may show which entries can be narrowed. Retain
+them until that run demonstrates that the Windows native build still works.

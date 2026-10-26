@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Downloads / Releases
-    url: https://github.com/NuvioMedia/NuvioMobile/releases
-    about: Grab the latest release here.
+    url: https://github.com/AlfaSierra92/NuvioDesktop/releases
+    about: Download builds of this Nuvio HTPC fork.
   - name: Documentation
-    url: https://github.com/NuvioMedia/NuvioMobile/blob/main/README.md
-    about: Read the README for setup and usage details.
+    url: https://github.com/AlfaSierra92/NuvioDesktop/blob/main/Docs/README.md
+    about: Read the setup, configuration, macOS and testing guides.

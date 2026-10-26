@@ -1,3 +1,8 @@
+> Reference copy: this directory documents Stremio's addon SDK/protocol, not
+> Nuvio HTPC installation, permissions or application URL registration. Deployment
+> providers and external links are upstream reference material. For the fork,
+> start at the [documentation index](../README.md).
+
 # Getting Started
 
 A NodeJS SDK for making and publishing Stremio addons

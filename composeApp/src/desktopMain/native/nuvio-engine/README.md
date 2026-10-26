@@ -1,5 +1,8 @@
 # Nuvio Engine on desktop
 
+See the [development guide](../../../../../Docs/Development.md) and
+[testing guide](../../../../../Docs/Testing.md) for the app build and validation boundaries.
+
 `nuvio_engine.dll` is built from a sibling checkout of [NuvioMedia/nuvio-engine](https://github.com/NuvioMedia/nuvio-engine)
 at `../nuvio-engine` (override with `-Pnuvio.engine.sourceDir=`), by `:composeApp:buildWindowsNuvioEngine`.
 
@@ -14,7 +17,7 @@ of those is missing; `createDistributable` refuses to package without the DLL.
 The same pinned, patched checkout below builds as `libnuvio_engine.dylib`:
 
 ```bash
-./gradlew :composeApp:buildMacosNuvioEngine \
+./gradlew --no-configuration-cache :composeApp:buildMacosNuvioEngine \
   -Pnuvio.engine.sourceDir=/absolute/path/to/nuvio-engine
 ```
 
@@ -30,8 +33,10 @@ replace the player's libraries. `createDistributable` includes a built runtime i
 `Contents/app/native/engine`. When the checkout is absent the task leaves any
 existing build in place; without an engine runtime the app uses TorrServer.
 
-The macOS smoke tests instantiate the real engine and check versions, JNI errors,
-cache pruning and metadata cancellation without requiring a live torrent swarm.
+The `NuvioEngineSmokeTest`, `NuvioEngineCachePruneTest` and
+`NuvioEngineMetadataWaitTest` exercise the built engine where available. They do
+not require a live torrent swarm; check prerequisites/skip conditions and report
+whether the real runtime was loaded rather than treating skipped tests as passes.
 
 ### Pinned checkout and patches
 
@@ -72,8 +77,18 @@ with `git apply` at configure time and fail on CRLF sources.
 Probes: `desktopTest --tests *NuvioEngineNetworkProbeTest -Pnuvio.p2pProbeHash=<hash> [-Pnuvio.p2pProbePreloadMb=64]`
 (linear read from a fresh engine) and `*NuvioEngineSeekProbeTest -Pnuvio.p2pSeekProbeHash=<hash>
 -Pnuvio.p2pSeekProbeOffsetsMb=0,tail,5000` (replays mpv-style seeks against the app's real engine state; close
-Nuvio first). `-Pnuvio.engineEnv=NAME=value;NAME2=value` passes env to the engine. Always `--rerun`: the DLL is not a
-test input.
+Nuvio first). `-Pnuvio.engineEnv=NAME=value;NAME2=value` passes env to the engine. Use `--rerun-tasks` when changing the loaded native runtime, which is not always
+tracked as a test input. These are opt-in live network probes, not ordinary unit tests.
 
 `jni_bridge.cpp` here is the engine's Android bridge with one line changed (empty TLS bundle path
 → nullptr so Windows uses the system certificate store). Re-copy and re-apply on an engine bump.
+
+
+## Reproducible source selection
+
+The pinned/patched checkout above describes the desktop engine configuration.
+The current macOS release workflow clones the engine repository shallowly without
+pinning `v0.1.1` or applying this patch series. Record the actual engine revision
+and patches for a build instead of assuming that every workflow artifact has the
+same source state as the local pinned build. See
+[release workflow](../../../../../.github/workflows/release-macos.yml).

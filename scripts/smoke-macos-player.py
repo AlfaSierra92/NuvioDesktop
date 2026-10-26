@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Exercise the packaged macOS player's real lifecycle with a local video.
+"""Exercise the packaged macOS player with a local file or HTTP(S) media URL.
 
-Usage: python3 scripts/smoke-macos-player.py /path/to/video.mp4
-Opens a test window for 30 seconds, using temporary app data, then closes it.
+Usage: python3 scripts/smoke-macos-player.py VIDEO_OR_URL [--app "/path/to/Nuvio HTPC.app"]
+Uses temporary file-backed data, checks playback for 30 seconds by default, and
+closes the test process. HDR/PiP flags add lifecycle checks. Loopback/Terminal
+success does not verify Finder LAN consent or isolate external session storage.
 """
 import argparse
 import os

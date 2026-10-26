@@ -1,5 +1,7 @@
 # clipboard
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 `java.awt.datatransfer.*`, `sun.datatransfer.*`, `sun.awt.datatransfer.*`,
 `java.rmi.MarshalledObject`, and the `java.datatransfer` module's `sun/datatransfer/resources/**`
 (`flavormap.properties`).

@@ -1,5 +1,7 @@
 # swing
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 `javax.swing.*`, `com.sun.java.swing.*`, `sun.swing.*` types, plus the Swing / AWT resource bundles
 (module-qualified: `com.sun.swing.internal.plaf.basic/metal.resources.*`,
 `com.sun.java.swing.plaf.windows.resources.windows`, `sun.awt.resources.awt`).

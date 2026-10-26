@@ -1,3 +1,7 @@
+> Historical upstream deployment reference. Provider availability and these
+> service-specific procedures have not been validated for this fork. Nuvio HTPC's
+> own build/release instructions are in the [development guide](../../Development.md).
+
 ## Deploying your Addon
 
 **Note:** Although deploying is recommended, there is also the alternative of using [localtunnel](https://github.com/localtunnel/localtunnel) to host your addons locally.
@@ -17,7 +21,7 @@ You can also check this very comprehensive [guide by nodejs](https://github.com/
 
 Stremio addons are deployed just like regular nodejs apps, so follow the nodejs instructions provided by your particular service provider.
 
-If you've built a great addon, and need help with hosting your addon, you are welcome to contact us at [addons@stremio.com](addons@stremio.com)
+If you've built a great addon, and need help with hosting your addon, you are welcome to contact us at [addons@stremio.com](mailto:addons@stremio.com)
 
 **NOTE:** we used to recommend now.sh, but after getting reports from multiple developers of now.sh suspending accounts without good reason, we no longer recommend it
 

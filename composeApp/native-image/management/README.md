@@ -1,5 +1,7 @@
 # management
 
+Scope: Windows GraalVM native-image metadata; see the [build overview](../README.md).
+
 The native image's own management beans (`com.oracle.svm.core...MXBean`: GC, memory pools, code
 cache, runtime, threads, class loading, compilation).
 
