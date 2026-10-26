@@ -52,6 +52,15 @@ internal fun PlayerScreenRuntime.loadAddonSubtitle(subtitle: AddonSubtitle, allo
 
     automaticSubtitleSyncJob = scope.launch {
         if (isTorrent && !awaitTorrentBufferForAutomaticSync { isStillSelected(subtitle) }) return@launch
+        // Preferred addon subtitles can be selected while the video is still opening. Index
+        // reads (and the audio fallback) must not compete with its first WebDAV range requests.
+        if (!isTorrent && sourceUrl?.startsWith("http", ignoreCase = true) == true) {
+            while (playerStartedAttemptId != playbackAttemptId || playbackSnapshot.isLoading) {
+                if (!isStillSelected(subtitle) || errorMessage != null) return@launch
+                delay(100L)
+            }
+        }
+        if (!isStillSelected(subtitle)) return@launch
         val syncSource = currentSyncSource() ?: return@launch
         sourceUrl = syncSource
         var result = try {

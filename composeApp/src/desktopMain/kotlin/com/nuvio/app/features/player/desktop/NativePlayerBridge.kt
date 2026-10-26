@@ -179,7 +179,7 @@ internal object NativePlayerBridge {
      * Holds (or releases) a keep-awake request for the display and system while a video plays.
      * Leaves [systemIdleMs] alone, so the screensaver's idle clock is unaffected.
      */
-    external fun setWindowsDisplaySleepInhibited(inhibited: Boolean): Boolean
+    external fun setDisplaySleepInhibited(inhibited: Boolean): Boolean
 
     /**
      * Whether the foreground window belongs to this process. AWT's `Window.isActive` cannot be
@@ -419,7 +419,7 @@ internal object NativePlayerBridge {
         }
 
     private fun exportControlsPageAssets(): ControlsPageAssets {
-        val root = File(System.getProperty("java.io.tmpdir"), "nuvio-player-ui").apply { mkdirs() }
+        val root = File(System.getProperty("java.io.tmpdir"), "nuviohtpc-player-ui").apply { mkdirs() }
         val fontsDir = root.resolve("fonts").apply { mkdirs() }
         val htmlFile = root.resolve("controls.html")
         writeTextIfChanged(

@@ -1,7 +1,10 @@
 package com.nuvio.app.features.games
 
+import com.nuvio.app.core.platform.chooseMacosFile
+import com.nuvio.app.core.platform.usesMacosNativeFileDialogs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.nuvio.app.core.platform.chooseDesktopDirectory
 import java.io.File
 import java.net.URI
 import javax.swing.JFileChooser
@@ -19,6 +22,11 @@ object GameLauncher {
                 initialFile?.isDirectory == true -> initialFile
                 initialFile?.parentFile?.isDirectory == true -> initialFile.parentFile
                 else -> null
+            }
+            if (usesMacosNativeFileDialogs) {
+                result[0] = chooseMacosFile("Choose game application or executable",
+                    initialFile = initialFile)?.absolutePath
+                return@Runnable
             }
             val chooser = JFileChooser(initialDirectory).apply {
                 dialogTitle = "Choose game executable or shortcut"
@@ -49,14 +57,7 @@ object GameLauncher {
                 initialFile?.parentFile?.isDirectory == true -> initialFile.parentFile
                 else -> null
             }
-            val chooser = JFileChooser(initialDirectory).apply {
-                dialogTitle = "Choose a folder of games"
-                fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-                isMultiSelectionEnabled = false
-            }
-            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-                result[0] = chooser.selectedFile?.absolutePath
-            }
+            result[0] = chooseDesktopDirectory("Choose a folder of games", initialDirectory?.absolutePath)
         }
         if (SwingUtilities.isEventDispatchThread()) showChooser.run() else SwingUtilities.invokeAndWait(showChooser)
         result[0]
@@ -175,7 +176,7 @@ fun isProtocolLaunchTarget(path: String): Boolean = PROTOCOL_LAUNCH_TARGET.conta
 private val PROTOCOL_LAUNCH_TARGET = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
 
 fun executableDisplayName(path: String): String =
-    File(path).nameWithoutExtension
+    File(path.replace('\\', '/')).nameWithoutExtension
         .replace(Regex("[_-]+"), " ")
         .trim()
         .replaceFirstChar { it.uppercase() }

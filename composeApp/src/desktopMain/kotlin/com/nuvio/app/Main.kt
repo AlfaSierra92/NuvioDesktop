@@ -457,9 +457,9 @@ fun main(args: Array<String>) {
     if (com.nuvio.app.core.build.AppClassArchiveTraining.BuildArgument in args) {
         com.nuvio.app.core.build.AppClassArchiveTraining.runForBuild()
     }
-    // A nuvio:// link the OS launched us with (see DesktopUrlScheme): handed to the running copy
+    // A nuviohtpc:// link the OS launched us with (see DesktopUrlScheme): handed to the running copy
     // if there is one, else opened here once the app is up.
-    val launchUrl = args.map(String::trim).firstOrNull { it.startsWith("nuvio://", ignoreCase = true) }
+    val launchUrl = args.map(String::trim).firstOrNull { it.startsWith("nuviohtpc://", ignoreCase = true) }
     // Before the log file or any store is opened: a second copy of Nuvio sharing the data directory
     // corrupts the log rotation and the image disk cache (see DesktopSingleInstance). The player
     // smoke harness is exempt — it is a deliberate side-by-side dev launch with its own window.
@@ -483,7 +483,7 @@ fun main(args: Array<String>) {
     // Now that this copy owns the data directory and before any store is read: a settings import
     // staged by the previous session lands here (see applyPendingSettingsImport).
     com.nuvio.app.features.settings.applyPendingSettingsImport(com.nuvio.app.core.storage.DesktopStorage.rootDir)
-    // Not from a nativeSmoke launch: it would point the user's nuvio:// links at the build folder.
+    // Not from a nativeSmoke launch: it would point the user's nuviohtpc:// links at the build folder.
     if (!com.nuvio.app.core.build.NativeImageSupport.selfTestRequested) DesktopUrlScheme.registerInBackground()
     // Held as the pending link until the app's navigation is up to take it. Straight to the link
     // queue rather than handleAppUrl, whose Trakt-callback check loads profile stores this early.
@@ -1085,6 +1085,43 @@ fun main(args: Array<String>) {
                 }
             } else {
                 val smokeLastSecond = remember { java.util.concurrent.atomic.AtomicLong(-1L) }
+                val smokePip = remember { mutableStateOf(false) }
+                if (System.getenv("NUVIO_DESKTOP_SMOKE_PIP_CYCLE") == "1") {
+                    com.nuvio.app.features.player.ManagePlayerPictureInPicture(
+                        isActive = smokePip.value,
+                        onActiveChange = { smokePip.value = it },
+                        isPlaying = true,
+                        playerSize = androidx.compose.ui.unit.IntSize.Zero,
+                    )
+                    LaunchedEffect(Unit) {
+                        try {
+                            delay(250L)
+                            window.toFront()
+                            window.requestFocus()
+                            kotlinx.coroutines.withTimeout(30_000L) {
+                                while (smokeLastSecond.get() < 2L) delay(100L)
+                            }
+                            repeat(3) { cycle ->
+                                val before = smokeLastSecond.get()
+                                println("Info: (PipSmoke) enter cycle=$cycle second=$before")
+                                smokePip.value = true
+                                delay(2_000L)
+                                check(smokePip.value && desktopPictureInPictureState.value) { "PiP state reverted" }
+                                check(window.width <= 600) { "PiP window did not shrink: ${window.bounds}" }
+                                check(smokeLastSecond.get() > before) { "Playback froze entering PiP" }
+                                println("Info: (PipSmoke) exit cycle=$cycle second=${smokeLastSecond.get()}")
+                                smokePip.value = false
+                                delay(2_000L)
+                                check(!desktopPictureInPictureState.value) { "PiP did not exit" }
+                            }
+                            println("PASS: (PipSmoke) three enter/exit cycles with advancing playback")
+                        } catch (error: Throwable) {
+                            System.err.println("FAIL: (PipSmoke) ${error.message}")
+                        } finally {
+                            exitDesktopApplication()
+                        }
+                    }
+                }
                 LaunchedEffect(smokePlayerUrl) {
                     if (System.getenv("NUVIO_DESKTOP_SMOKE_HDR_CYCLE") == "1") {
                         delay(5_000L)
@@ -1103,6 +1140,9 @@ fun main(args: Array<String>) {
                 PlatformPlayerSurface(
                     sourceUrl = smokePlayerUrl,
                     modifier = Modifier.fillMaxSize(),
+                    playerControlsState = com.nuvio.app.features.player.PlayerControlsState(
+                        pictureInPictureActive = smokePip.value,
+                    ),
                     onControllerReady = { println("Info: (PlayerSmoke) controller ready") },
                     onSnapshot = { snapshot ->
                         val second = snapshot.positionMs / 1000L

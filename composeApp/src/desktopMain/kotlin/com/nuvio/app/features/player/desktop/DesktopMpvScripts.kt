@@ -8,7 +8,7 @@ import java.io.File
  */
 internal object DesktopMpvScripts {
     private val exportRoot: File by lazy {
-        File(System.getProperty("java.io.tmpdir"), "nuvio-scripts").apply { mkdirs() }
+        File(System.getProperty("java.io.tmpdir"), "nuviohtpc-scripts").apply { mkdirs() }
     }
 
     /**

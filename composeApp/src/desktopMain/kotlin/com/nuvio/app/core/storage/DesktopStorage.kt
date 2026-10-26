@@ -92,8 +92,10 @@ internal object DesktopStorage {
             val destination = appDataInstallDir()
             val parent = destination.parent
             val legacy = parent.resolve(if (osName.contains("mac")) "Nuvio" else "nuvio")
-            freshInstall = !destination.exists() && !legacy.exists()
-            migrateLegacyDirectories(destination, legacy)
+            // Upstream's presence must not import its accounts, paths or machine settings.
+            val forkLegacy = legacy.takeIf(::holdsHtpcOnlyStore)
+            freshInstall = !destination.exists() && forkLegacy == null
+            migrateLegacyDirectories(destination, *listOfNotNull(forkLegacy).toTypedArray())
             return destination
         }
 

@@ -1,5 +1,7 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.core.platform.chooseMacosFile
+import com.nuvio.app.core.platform.usesMacosNativeFileDialogs
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.build.applicationBundleExecutable
 import com.nuvio.app.core.build.desktopExecutableDirectories
@@ -520,17 +522,20 @@ internal actual object ExternalPlayerPlatform {
         val holder = arrayOfNulls<String>(1)
         val choose = Runnable {
             runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-            val chooser = JFileChooser().apply {
-                dialogTitle = "Locate ${def.displayName}"
-                fileSelectionMode = if (isWindows) JFileChooser.FILES_ONLY else JFileChooser.FILES_AND_DIRECTORIES
-                isMultiSelectionEnabled = false
-                if (isWindows) {
-                    fileFilter = FileNameExtensionFilter("Applications (*.exe)", "exe")
+            val file = if (usesMacosNativeFileDialogs) {
+                chooseMacosFile("Locate ${def.displayName}", initialFile = File("/Applications"))
+            } else {
+                val chooser = JFileChooser().apply {
+                    dialogTitle = "Locate ${def.displayName}"
+                    fileSelectionMode = if (isWindows) JFileChooser.FILES_ONLY else JFileChooser.FILES_AND_DIRECTORIES
+                    isMultiSelectionEnabled = false
+                    if (isWindows) fileFilter = FileNameExtensionFilter("Applications (*.exe)", "exe")
                 }
+                if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
             }
-            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-                val selected = chooser.selectedFile
-                    ?.let { applicationBundleExecutable(it, def.executableNames) ?: it }
+            if (file != null) {
+                val selected = file
+                    .let { applicationBundleExecutable(it, def.executableNames) ?: it }
                     ?.takeIf(File::isLaunchableFile)
                 val valid = selected != null && (
                     !isWindows || def.executableNames.any { it.equals(selected.name, ignoreCase = true) }

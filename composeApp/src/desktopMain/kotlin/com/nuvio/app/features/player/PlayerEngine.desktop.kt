@@ -3,7 +3,6 @@ package com.nuvio.app.features.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1195,13 +1194,10 @@ private fun NativePlayerSurface(
                 factory = {
                     host
                 },
-                modifier = if (hostFirstPaintComplete.value) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .requiredSize(1.dp)
-                },
+                // Keep the native surface laid out independently of its paint callback. A 1x1
+                // staging Canvas can receive no paint (especially after a PiP peer/layout change),
+                // leaving both the resize and the native attach waiting on that missing paint.
+                modifier = Modifier.fillMaxSize(),
                 background = Color.Black,
             )
         }

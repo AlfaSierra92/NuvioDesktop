@@ -7718,7 +7718,7 @@ bool setDisplaySleepInhibited(bool inhibited) {
 } // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setWindowsDisplaySleepInhibited(JNIEnv *, jobject, jboolean inhibited) {
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setDisplaySleepInhibited(JNIEnv *, jobject, jboolean inhibited) {
     return setDisplaySleepInhibited(inhibited == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 

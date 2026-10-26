@@ -13,6 +13,16 @@ class PartyDeepLinkTest {
     }
 
     @Test
+    fun `HTPC links target the fork and round trip`() {
+        val meta = buildMetaDeepLinkUrl("series", "tt0944947")
+        assertEquals("nuviohtpc://meta?type=series&id=tt0944947", meta)
+        assertEquals(AppDeepLink.Meta("series", "tt0944947"), parseAppDeepLink(meta))
+        assertEquals("nuviohtpc://downloads", buildDownloadsDeepLinkUrl())
+        assertEquals(AppDeepLink.Downloads, parseAppDeepLink(buildDownloadsDeepLinkUrl()))
+        assertEquals(AppDeepLink.Party("K7Q4MX"), parseAppDeepLink("nuviohtpc://party/K7Q4MX"))
+    }
+
+    @Test
     fun `nuvio tv share links are invites`() {
         assertEquals(AppDeepLink.Party("K7Q4MX"), parseAppDeepLink("https://nuvio.tv/party/K7Q4MX"))
     }

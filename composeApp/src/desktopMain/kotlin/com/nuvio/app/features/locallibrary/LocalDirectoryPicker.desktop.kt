@@ -2,7 +2,7 @@ package com.nuvio.app.features.locallibrary
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import javax.swing.JFileChooser
+import com.nuvio.app.core.platform.chooseDesktopDirectory
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 
@@ -12,14 +12,7 @@ internal actual object LocalDirectoryPicker {
         val holder = arrayOfNulls<String>(1)
         val run = Runnable {
             runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-            val chooser = JFileChooser().apply {
-                fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-                dialogTitle = "Choose a media folder"
-                isMultiSelectionEnabled = false
-            }
-            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-                holder[0] = chooser.selectedFile?.absolutePath
-            }
+            holder[0] = chooseDesktopDirectory("Choose a media folder")
         }
         if (SwingUtilities.isEventDispatchThread()) run.run() else SwingUtilities.invokeAndWait(run)
         holder[0]

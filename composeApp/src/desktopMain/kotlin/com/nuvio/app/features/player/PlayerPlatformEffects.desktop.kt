@@ -42,8 +42,12 @@ actual fun EnterImmersivePlayerMode(keepScreenAwake: Boolean) {
 }
 
 private fun setDisplaySleepInhibited(inhibited: Boolean) {
-    if (DesktopHostOs.current != DesktopHostOs.WINDOWS) return
-    runCatching { NativePlayerBridge.setWindowsDisplaySleepInhibited(inhibited) }
+    if (DesktopHostOs.current !in setOf(DesktopHostOs.WINDOWS, DesktopHostOs.MACOS)) return
+    runCatching {
+        check(NativePlayerBridge.setDisplaySleepInhibited(inhibited)) {
+            "Operating system rejected the keep-awake request"
+        }
+    }
         .onFailure { PlayerKeepAwakeLog.w(it) { "keep-awake ${if (inhibited) "on" else "off"} failed" } }
 }
 

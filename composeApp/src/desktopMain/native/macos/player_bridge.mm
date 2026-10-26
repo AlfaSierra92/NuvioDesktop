@@ -2,6 +2,7 @@
 #import <Carbon/Carbon.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <IOKit/IOKitLib.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
 #define GL_SILENCE_DEPRECATION
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <dlfcn.h>
 #include <string>
+#include <mutex>
 #include <vector>
 #include "hdr_output.h"
 
@@ -1025,6 +1027,25 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     mpv_set_option_string(mpv, name, value);
 }
 
+static void setMpvHttpHeaders(mpv_handle *mpv, NSArray<NSString *> *headerLines) {
+    if (headerLines.count == 0) return;
+    // Pass an actual list: comma-separated option strings split browser User-Agents
+    // ("KHTML, like Gecko") into malformed headers and can alter literal backslashes.
+    // mpv copies these strings synchronously; NSString owns them for the whole call.
+    std::vector<mpv_node> values(headerLines.count);
+    for (NSUInteger index = 0; index < headerLines.count; ++index) {
+        values[index].format = MPV_FORMAT_STRING;
+        values[index].u.string = const_cast<char *>(headerLines[index].UTF8String);
+    }
+    mpv_node_list list = {};
+    list.num = static_cast<int>(values.size());
+    list.values = values.data();
+    mpv_node headers = {};
+    headers.format = MPV_FORMAT_NODE_ARRAY;
+    headers.u.list = &list;
+    mpv_set_option(mpv, "http-header-fields", MPV_FORMAT_NODE, &headers);
+}
+
 @implementation MpvWebPlayer {
     NSString *_probeSource;
     NSString *_probeAudioSource;
@@ -1508,10 +1529,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
     setMpvOptionString(_mpv, "hr-seek", "no");
     }
 
-    if (headerLines.count > 0) {
-        NSString *headers = [headerLines componentsJoinedByString:@","];
-        setMpvOptionString(_mpv, "http-header-fields", headers.UTF8String);
-    }
+    setMpvHttpHeaders(_mpv, headerLines);
 
     // External audio track (e.g. a YouTube trailer with separate hi-res video + audio).
     // The "-append" action takes the value as a single entry, so a URL containing commas
@@ -2555,15 +2573,7 @@ static void setMpvOptionString(mpv_handle *mpv, const char *name, const char *va
         {"network-timeout", "10"}, {"demuxer-readahead-secs", "1"}, {"demuxer-max-bytes", "8MiB"}}) {
         mpv_set_option_string(probe, option.first, option.second);
     }
-    std::string headers;
-    for (NSString *line in _probeHeaders) {
-        if (!headers.empty()) headers += ',';
-        for (char ch : std::string(line.UTF8String)) {
-            if (ch == ',' || ch == '\\') headers += '\\';
-            headers += ch;
-        }
-    }
-    if (!headers.empty()) mpv_set_option_string(probe, "http-header-fields", headers.c_str());
+    setMpvHttpHeaders(probe, _probeHeaders);
     return probe;
 }
 
@@ -3390,6 +3400,49 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isMuted(
     __block double value = 0;
     runOnMainSync(^{ value = [player flagProperty:"mute" fallback:NO]; });
     return value ? JNI_TRUE : JNI_FALSE;
+}
+
+namespace {
+std::mutex playbackSleepMutex;
+IOPMAssertionID playbackDisplayAssertion = kIOPMNullAssertionID;
+IOPMAssertionID playbackSystemAssertion = kIOPMNullAssertionID;
+
+bool releasePlaybackSleepAssertions() {
+    bool success = true;
+    for (auto *assertion : {&playbackDisplayAssertion, &playbackSystemAssertion}) {
+        if (*assertion == kIOPMNullAssertionID) continue;
+        if (IOPMAssertionRelease(*assertion) == kIOReturnSuccess) {
+            *assertion = kIOPMNullAssertionID;
+        } else {
+            success = false;
+        }
+    }
+    return success;
+}
+}
+
+// Explicit assertions cover both render backends and do not reset the user's input idle clock.
+// macOS releases these automatically if the process exits unexpectedly.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setDisplaySleepInhibited(
+    JNIEnv *, jobject, jboolean inhibited
+) {
+    std::lock_guard<std::mutex> lock(playbackSleepMutex);
+    if (inhibited != JNI_TRUE) return releasePlaybackSleepAssertions() ? JNI_TRUE : JNI_FALSE;
+    if (playbackDisplayAssertion == kIOPMNullAssertionID &&
+        IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep,
+            kIOPMAssertionLevelOn, CFSTR("Nuvio video playback display"),
+            &playbackDisplayAssertion) != kIOReturnSuccess) {
+        return JNI_FALSE;
+    }
+    if (playbackSystemAssertion == kIOPMNullAssertionID &&
+        IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep,
+            kIOPMAssertionLevelOn, CFSTR("Nuvio video playback system"),
+            &playbackSystemAssertion) != kIOReturnSuccess) {
+        releasePlaybackSleepAssertions();
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 // The hardware idle clock also sees input consumed by WebKit and native video surfaces.

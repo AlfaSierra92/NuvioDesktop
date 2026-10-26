@@ -31,6 +31,60 @@ import kotlin.test.assertTrue
 class PlaybackRedirectResolverTest {
 
     @Test
+    fun aioResolverUsesGetAndDoesNotOpenSameHostWebDavTarget() = runBlocking {
+        withProbeServer { server, source, requests ->
+            val resolver = source.substringBeforeLast('/') + "/api/v1/debrid/playback/${UUID.randomUUID()}"
+            val target = source.substringBeforeLast('/') + "/api/v1/usenet/video/movie.mkv"
+            server.createContext("/") { exchange ->
+                requests += "${exchange.requestMethod} ${exchange.requestURI.path}"
+                if (exchange.requestMethod == "HEAD") {
+                    exchange.sendResponseHeaders(405, -1)
+                } else {
+                    exchange.responseHeaders.add("Location", target)
+                    exchange.responseHeaders.add("Cache-Control", "no-store")
+                    exchange.sendResponseHeaders(307, -1)
+                }
+                exchange.close()
+            }
+            val result = PlaybackRedirectResolver.resolve(resolver, emptyMap(), forceProbe = true)
+            assertEquals(PlaybackRedirectResolution.Outcome.Pinned, result.outcome)
+            assertEquals(target, result.playbackUrl)
+            assertEquals(listOf("GET ${java.net.URI(resolver).path}"), requests.toList())
+        }
+    }
+
+    @Test
+    fun resolverThatIgnoresRangeHasItsBodyCancelledAtHeaders() = runBlocking {
+        withProbeServer { server, source, requests ->
+            val resolver = source.substringBeforeLast('/') + "/api/v1/debrid/playback/${UUID.randomUUID()}"
+            val connectionClosed = CountDownLatch(1)
+            val bytesWritten = java.util.concurrent.atomic.AtomicLong()
+            server.createContext("/") { exchange ->
+                requests += exchange.requestMethod
+                try {
+                    exchange.sendResponseHeaders(200, 64L * 1024 * 1024)
+                    repeat(8192) {
+                        exchange.responseBody.write(ByteArray(8192))
+                        exchange.responseBody.flush()
+                        bytesWritten.addAndGet(8192)
+                        Thread.sleep(10)
+                    }
+                } catch (_: Exception) {
+                    // The probe must cancel the download, even when the server ignores Range.
+                } finally {
+                    exchange.close()
+                    connectionClosed.countDown()
+                }
+            }
+            val result = PlaybackRedirectResolver.resolve(resolver, emptyMap(), forceProbe = true)
+            assertEquals(PlaybackRedirectResolution.Outcome.NoRedirect, result.outcome)
+            assertTrue(withContext(Dispatchers.IO) { connectionClosed.await(1, TimeUnit.SECONDS) })
+            assertTrue(bytesWritten.get() < 1024 * 1024, "Must not drain the media body to reuse the socket")
+            assertEquals(listOf("GET"), requests.toList())
+        }
+    }
+
+    @Test
     fun cancellingProbeClosesTheConnectionAtTheServer() = runBlocking {
         // Check the actual TCP socket, not only the coroutine's cancelled flag.
         repeat(10) {

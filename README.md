@@ -338,7 +338,33 @@ settings through Gradle properties, environment variables, or `local.properties`
 
 Local builds without these settings are not Developer ID signed or Apple notarized.
 Copied player libraries receive ad-hoc signatures after their loader paths are
-rewritten, as required for loading them on Apple Silicon.
+rewritten, as required for loading them on Apple Silicon. After native staging and
+jar processing, the build signs the finished bundle again (using the configured
+identity, or ad hoc for local builds) and verifies it with `codesign --verify --deep --strict`.
+
+The macOS bundle has its own identity (`com.nuvio.htpc.desktop`) and URL scheme
+(`nuviohtpc://`), so it can coexist with the original Nuvio. Its data stays in
+`~/Library/Application Support/NuvioHTPC`; upstream data is not imported automatically
+unless the old directory contains stores specific to this fork. Temporary player
+files also use HTPC-specific directories, and this fork does not delete binaries
+from the original app’s temporary TorrServer directory.
+
+On first access to a LAN server (for example `http://192.168.1.10:8096/`), allow
+**Local Network** access for **Nuvio HTPC**. Native macOS open/save
+panels cover media/game folders, game and external-player applications, settings
+backup/import, catalog import/export and subtitle saves. Select the resource there
+to authorize access. File dialogs run on the UI thread and restore folder-picker
+mode after use, including cancellation. The bundle
+includes usage descriptions for protected folders, network volumes and removable
+volumes. The Automation entitlement and description cover the optional idle-shutdown
+request; it is sent only after its enabled countdown expires. DLNA casting uses the
+local-network permission. Media decoding, thumbnails, subtitle synchronization and
+GameController input do not use microphone or screen capture APIs. If access was
+denied earlier, enable it in System Settings > Privacy & Security > Local Network or Files & Folders, then retry. These permissions must be
+validated from the packaged `.app`; running via Terminal/Gradle has a different
+privacy identity. Apple recommends an Apple-issued signing identity for reliable
+local-network permission tracking across builds (see
+[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)).
 
 ### macOS validation
 
@@ -348,6 +374,15 @@ audio samples, AutoCrop and Now Playing cleanup:
 
 ```bash
 sh scripts/test-macos-player-features.sh
+```
+
+The HTTP regression harness starts a strict loopback server, checks that browser
+User-Agents and other headers retain commas/backslashes, and verifies that native
+playback loads and advances both directly and after a redirect. The optional
+`--app` also tests the packaged app with a temporary profile:
+
+```bash
+python3 scripts/test-macos-http-headers.py --app "composeApp/build/compose/binaries/main/app/Nuvio HTPC.app"
 ```
 
 External mpv tracking, executable discovery, Game Mode and path handling also have

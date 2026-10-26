@@ -15,24 +15,32 @@ import time
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("video", type=Path)
+    parser.add_argument("video", help="Local video file or HTTP(S) media URL")
     parser.add_argument("--app", type=Path, default=Path(__file__).resolve().parents[1] /
                         "composeApp/build/compose/binaries/main-release/app/Nuvio HTPC.app")
     parser.add_argument("--seconds", type=int, default=30)
     parser.add_argument("--hdr-cycle", action="store_true", help="Cycle HDR modes repeatedly and check the final output encoding")
+    parser.add_argument("--pip-cycle", action="store_true", help="Enter/exit PiP three times from windowed playback and verify clean shutdown")
     parser.add_argument("--expect-hdr-source", action="store_true", help="Require HDR input detection during the mode cycle")
     args = parser.parse_args()
     executable = args.app / "Contents/MacOS/Nuvio HTPC"
-    if not args.video.is_file() or not executable.is_file():
-        parser.error("Both a local video and a built Nuvio HTPC.app are required")
+    remote = re.match(r"^https?://", args.video, re.IGNORECASE) is not None
+    video = Path(args.video)
+    if (not remote and not video.is_file()) or not executable.is_file():
+        parser.error("A video file or HTTP(S) URL and a built Nuvio HTPC.app are required")
     if args.seconds < 10:
         parser.error("Run for at least 10 seconds to verify sustained progress")
     root = Path(tempfile.mkdtemp(prefix="nuvio-macos-playback-"))
     env = os.environ.copy()
     env["JAVA_TOOL_OPTIONS"] = f"-Dnuvio.desktop.dataDir={root}/data -Dnuvio.dev.localNatives=false"
-    env["NUVIO_DESKTOP_SMOKE_PLAYER_URL"] = str(args.video.resolve())
+    env["NUVIO_DESKTOP_SMOKE_PLAYER_URL"] = args.video if remote else str(video.resolve())
     if args.hdr_cycle:
         env["NUVIO_DESKTOP_SMOKE_HDR_CYCLE"] = "1"
+    if args.pip_cycle:
+        env["NUVIO_DESKTOP_SMOKE_PIP_CYCLE"] = "1"
+        profile = root / "data"
+        profile.mkdir()
+        (profile / "nuvio_window_state.properties").write_text("start_windowed=true\n")
     print(f"Test artifacts: {root}", flush=True)
     with (root / "console.log").open("w") as output:
         process = subprocess.Popen([str(executable.resolve())], env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -43,7 +51,7 @@ def main():
             text = (root / "console.log").read_text(errors="replace")
             positions = [int(second) for second in re.findall(r"\(PlayerSmoke\) progress second=(\d+)", text)]
             checks = {
-                "app remains running": process.poll() is None,
+                "app lifecycle completes as expected": process.poll() == 0 if args.pip_cycle else process.poll() is None,
                 "native player created exactly once": len(re.findall(r"\(PlaybackStartTrace\) id=\d+ nativeCreateReturned ", text)) == 1,
                 "file loaded event delivered": "(PlaybackStartTrace)" in text and " fileLoaded " in text,
                 "first frame delivered": re.search(r"\(PlaybackStartTrace\).*summary:.*playbackRestart", text) is not None,
@@ -52,6 +60,9 @@ def main():
                 "no missing JNI methods": "UnsatisfiedLinkError" not in text,
                 "no player errors": "Error: (PlayerSmoke)" not in text,
             }
+            if args.pip_cycle:
+                checks["three PiP cycles keep the video advancing"] = "PASS: (PipSmoke) three enter/exit cycles with advancing playback" in text
+                checks["native player shuts down cleanly"] = "(DesktopShutdown) native player cleanup completed=true" in text
             if args.hdr_cycle:
                 modes = re.findall(r"\(MacosHdr\) mode=(\w+) sourceHdr=(\d) output=(\w+) primaries=([\w.]+) transfer=([\w.]+) reason=mode-change", text)
                 tonemap = [row for row in modes if row[0] == "AlwaysTonemap"]

@@ -298,7 +298,14 @@ internal object DesktopScreensaver {
             // Nothing is going to turn the PC off; behave as if the countdown was cancelled and
             // do not try again this session — the failure is not going to fix itself.
             shade?.fadeOut()
-            JOptionPane.showMessageDialog(owner, "The system could not start shutdown. Nuvio will remain open.",
+            val message = if (DesktopHostOs.current == DesktopHostOs.MACOS) {
+                "macOS could not start shutdown. If you denied Automation access, allow Nuvio HTPC " +
+                    "in System Settings > Privacy & Security > Automation, then try again. " +
+                    "Nuvio HTPC will remain open."
+            } else {
+                "The system could not start shutdown. Nuvio will remain open."
+            }
+            JOptionPane.showMessageDialog(owner, message,
                 "Automatic shutdown", JOptionPane.ERROR_MESSAGE)
             return
         }

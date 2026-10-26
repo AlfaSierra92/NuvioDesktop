@@ -595,7 +595,6 @@ internal object TorrServerP2pBackend : DesktopP2pBackend {
         private fun extractBundledBinary(platform: DesktopTorrServerPlatform): File? {
             val resource = "torrserver/${platform.resourceDir}/${platform.binaryName}"
             val digest = PackagedResources.open(resource)?.use(::sha256) ?: return null
-            cleanupLegacyTempBinaries(platform)
 
             val dir = DesktopStorage.rootDir.resolve("torrserver/bin/${platform.resourceDir}").toFile().apply {
                 check(mkdirs() || isDirectory) { "Could not create TorrServer binary directory: $absolutePath" }
@@ -633,17 +632,6 @@ internal object TorrServerP2pBackend : DesktopP2pBackend {
             } finally {
                 runCatching { Files.deleteIfExists(temporary) }
             }
-        }
-
-        private fun cleanupLegacyTempBinaries(platform: DesktopTorrServerPlatform) {
-            val legacyDir = File(System.getProperty("java.io.tmpdir"), "nuvio-torrserver/${platform.resourceDir}")
-            legacyDir.listFiles()
-                ?.asSequence()
-                ?.filter { it.isFile && it.name.startsWith("TorrServer-") }
-                ?.forEach { stale ->
-                    runCatching { Files.deleteIfExists(stale.toPath()) }
-                        .onFailure { error -> log.d(error) { "Could not remove legacy TorrServer binary ${stale.absolutePath}" } }
-                }
         }
 
         private fun cleanupOutdatedBundledBinaries(directory: File, current: File) {

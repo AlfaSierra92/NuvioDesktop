@@ -2,12 +2,10 @@ package com.nuvio.app.features.player.autosync
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -137,19 +135,6 @@ internal object EmbeddedSubtitleTimelineLoader {
         ): Boolean = size > MAX_CACHE_ENTRIES
     }
     private val inFlight = mutableMapOf<String, CompletableDeferred<IndexedEmbeddedTimeline?>>()
-
-    /**
-     * Starts loading the index in [scope] so a later [load] finds it cached or joins the
-     * in-flight download instead of starting from zero when AutoSync runs.
-     */
-    fun prefetch(
-        scope: CoroutineScope,
-        sourceUrl: String,
-        sourceHeaders: Map<String, String> = emptyMap(),
-        pace: Pace = Pace.NETWORK,
-    ) {
-        scope.launch { load(sourceUrl, sourceHeaders, pace) }
-    }
 
     suspend fun load(
         sourceUrl: String,

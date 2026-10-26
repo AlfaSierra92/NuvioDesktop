@@ -32,7 +32,7 @@ internal actual fun heroBundledBadgeModel(fileName: String): Any? {
 private object HeroCustomBadgeResourceAnchor
 
 private fun resolveBundledBadgeCacheDirectory(): File =
-    File(System.getProperty("java.io.tmpdir"), "nuvio-bundled-badges")
+    File(System.getProperty("java.io.tmpdir"), "nuviohtpc-bundled-badges")
 
 private fun resolveBadgeDirectory(): File {
     return DesktopStorage.rootDir.resolve("Badges").toFile()

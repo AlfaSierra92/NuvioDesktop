@@ -178,7 +178,7 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
         SubtitleRepository.clear()
         WatchProgressRepository.ensureLoaded()
 
-        providerDiagnosticProbePendingSourceUrl = activeSourceUrl.takeIf(::isProviderPlaybackEndpoint)
+        providerDiagnosticProbePendingSourceUrl = null
         // A placeholder that reached the player (an older cache entry, or a reuse path that saved
         // before this guard existed) must not survive to replay on the next open of this title.
         // The cache would refuse it on read anyway; evicting here also clears the entry now.
@@ -215,37 +215,8 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
             )
             return@LaunchedEffect
         }
-        if (!isProviderPlaybackEndpoint(probedUrl)) {
-            if (providerDiagnosticProbePendingSourceUrl == probedUrl) {
-                providerDiagnosticProbePendingSourceUrl = null
-            }
-            return@LaunchedEffect
-        }
-
-        providerDiagnosticProbePendingSourceUrl = probedUrl
-        providerDiagnosticRecoveryAttemptedSourceUrl = probedUrl
-        val diagnostic = resolveProviderDiagnosticVideo(
-            sourceUrl = probedUrl,
-            sourceHeaders = activeSourceHeaders,
-        )
-        if (activeSourceUrl != probedUrl) {
-            diagnostic?.let { releaseProviderDiagnosticVideo(it.sourceUrl) }
-            return@LaunchedEffect
-        }
-        providerDiagnosticProbePendingSourceUrl = null
-        if (diagnostic != null) {
-            if (shouldSkipProviderDiagnosticVideo(playerSettingsUiState.streamFailoverEnabled)) {
-                releaseProviderDiagnosticVideo(diagnostic.sourceUrl)
-                tryFailoverToNextSource(
-                    message = getString(Res.string.player_error_unable_to_play_stream),
-                    playbackFailedToast = getString(Res.string.player_error_playback_failed),
-                    tryingNextToast = getString(Res.string.player_failover_trying_next),
-                    trigger = StreamFailoverTrigger.ProviderDiagnosticVideo,
-                )
-            } else {
-                activateProviderDiagnosticVideo(diagnostic)
-            }
-        }
+        // Do not GET the same media in parallel with mpv just to look for a status clip.
+        // Explicit status URLs are handled above; unknown clips are inspected after a real error.
     }
 
     LaunchedEffect(
@@ -353,19 +324,8 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
 
     LaunchedEffect(activeSourceUrl, activeSourceHeaders, playerSettingsUiState.automaticSubtitleSyncEnabled) {
         automaticallySyncedSubtitle = null
-        val sourceUrl = activeSourceUrl ?: return@LaunchedEffect
-        // Live TV has no fixed timeline to sync against, and each read would take one of the
-        // provider's few connections.
-        if (playerSettingsUiState.automaticSubtitleSyncEnabled && !isIptvPlayback &&
-            (sourceUrl.startsWith("http://", ignoreCase = true) || sourceUrl.startsWith("https://", ignoreCase = true))
-        ) {
-            // A cold WebDAV file may need server-side preparation. Let the player's first open
-            // finish before competing with it, and keep this work owned by the source's effect.
-            snapshotFlow {
-                playerControllerSourceUrl == sourceUrl && playbackSnapshot.isPlaying && !playbackSnapshot.isLoading
-            }.first { it }
-            prefetchAutomaticSubtitleSyncIndex(sourceUrl, activeSourceHeaders)
-        }
+        // Subtitle timing is loaded on demand when an external subtitle is selected.
+        // Speculative index reads open another WebDAV transfer even with embedded subtitles.
     }
 
     LaunchedEffect(playerController, subtitleStyle) {

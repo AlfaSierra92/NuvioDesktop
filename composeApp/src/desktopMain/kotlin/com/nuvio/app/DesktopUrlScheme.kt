@@ -5,8 +5,8 @@ import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 /**
- * Makes `nuvio://` links open this app on Windows, so a web page (a tracker's "Open in Nuvio")
- * can hand a title to it: `nuvio://meta?type=series&id=tt0944947` opens that title's page.
+ * Makes `nuviohtpc://` links open this app on Windows, so a web page (a tracker's "Open in Nuvio")
+ * can hand a title to it: `nuviohtpc://meta?type=series&id=tt0944947` opens that title's page.
  *
  * The MSI doesn't register the scheme, so the installed app does it on each launch, under
  * HKEY_CURRENT_USER (no elevation) and pointing at the Nuvio.exe that is running — an update or a
@@ -34,7 +34,7 @@ object DesktopUrlScheme {
         val exe = System.getProperty("jpackage.app-path")?.takeIf { it.isNotBlank() } ?: return
         Thread({
             runCatching { register(exe) }
-                .onFailure { System.err.println("Warn: (UrlScheme) couldn't register nuvio:// links: $it") }
+                .onFailure { System.err.println("Warn: (UrlScheme) couldn't register nuviohtpc:// links: $it") }
         }, "nuvio-url-scheme").apply { isDaemon = true }.start()
     }
 
@@ -42,12 +42,12 @@ object DesktopUrlScheme {
         val escaped = exe.replace("\\", "\\\\").replace("\"", "\\\"")
         val reg = buildString {
             append("Windows Registry Editor Version 5.00\r\n\r\n")
-            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuvio]\r\n")
-            append("@=\"URL:Nuvio\"\r\n")
+            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuviohtpc]\r\n")
+            append("@=\"URL:Nuvio HTPC\"\r\n")
             append("\"URL Protocol\"=\"\"\r\n\r\n")
-            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuvio\\DefaultIcon]\r\n")
+            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuviohtpc\\DefaultIcon]\r\n")
             append("@=\"\\\"$escaped\\\",0\"\r\n\r\n")
-            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuvio\\shell\\open\\command]\r\n")
+            append("[HKEY_CURRENT_USER\\Software\\Classes\\nuviohtpc\\shell\\open\\command]\r\n")
             append("@=\"\\\"$escaped\\\" \\\"%1\\\"\"\r\n")
         }
         val file = Files.createTempFile("nuvio-url-scheme", ".reg")
@@ -59,7 +59,7 @@ object DesktopUrlScheme {
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
                 .start()
             if (!process.waitFor(10, TimeUnit.SECONDS)) process.destroy()
-            else if (process.exitValue() == 0) System.out.println("Info: (UrlScheme) nuvio:// links open $exe")
+            else if (process.exitValue() == 0) System.out.println("Info: (UrlScheme) nuviohtpc:// links open $exe")
         } finally {
             Files.deleteIfExists(file)
         }
@@ -67,7 +67,7 @@ object DesktopUrlScheme {
 }
 
 internal fun dispatchDesktopOpenUri(uri: java.net.URI, queue: (String) -> Unit, activate: () -> Unit): Boolean {
-    if (!uri.scheme.equals("nuvio", ignoreCase = true)) return false
+    if (!uri.scheme.equals("nuviohtpc", ignoreCase = true)) return false
     queue(uri.toString())
     activate()
     return true

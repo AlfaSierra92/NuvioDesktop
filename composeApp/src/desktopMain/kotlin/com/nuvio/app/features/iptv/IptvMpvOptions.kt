@@ -50,7 +50,7 @@ internal fun iptvRewindActive(sourceUrl: String?): Boolean =
 internal fun iptvRewindMpvOptions(sourceUrl: String): List<String> {
     if (!iptvRewindActive(sourceUrl)) return emptyList()
     val minutes = IptvRepository.settings.value.rewindMinutes
-    val cacheDir = File(System.getProperty("java.io.tmpdir"), "nuvio-iptv-cache").apply { mkdirs() }
+    val cacheDir = File(System.getProperty("java.io.tmpdir"), "nuviohtpc-iptv-cache").apply { mkdirs() }
     return listOf(
         "cache=yes",
         "cache-on-disk=yes",

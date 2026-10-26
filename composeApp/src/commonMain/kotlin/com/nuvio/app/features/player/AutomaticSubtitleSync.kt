@@ -40,9 +40,6 @@ internal expect suspend fun runAutomaticSubtitleSync(
     request: AutomaticSubtitleSyncRequest,
 ): AutomaticSubtitleSyncResult
 
-/** Reads the subtitle index within the caller's playback lifecycle; cancellation closes its HTTP calls. */
-internal expect suspend fun prefetchAutomaticSubtitleSyncIndex(sourceUrl: String, sourceHeaders: Map<String, String>)
-
 /** Progress of [runAudioReferencedSubtitleSync]; each [Applied] replaces the previous one. */
 internal sealed interface AudioSubtitleSyncUpdate {
     /** Load [synced] now. [confirmed] false = an early estimate that may still move or be withdrawn. */

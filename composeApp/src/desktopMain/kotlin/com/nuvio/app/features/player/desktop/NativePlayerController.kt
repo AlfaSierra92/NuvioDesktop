@@ -1761,7 +1761,7 @@ internal class NativePlayerController(
     override fun decodeSpeechSpot(startSeconds: Double, durationSeconds: Double): FloatArray? {
         if (!supportsSpeechSpots) return null
         val current = handle.takeIf { it != 0L } ?: return null
-        val directory = File(System.getProperty("java.io.tmpdir"), "nuvio-autosync").apply { mkdirs() }
+        val directory = File(System.getProperty("java.io.tmpdir"), "nuviohtpc-autosync").apply { mkdirs() }
         val file = File.createTempFile("speech-", ".f32", directory)
         return try {
             val result = NativePlayerBridge.decodeSpeechSpot(current, startSeconds, durationSeconds, file.absolutePath)

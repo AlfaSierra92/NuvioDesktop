@@ -10,7 +10,17 @@ internal class NativePlayerHost : Canvas() {
     var onPeerReady: (() -> Unit)? = null
     var onDisplayableChanged: ((Boolean) -> Unit)? = null
     var onFirstPaint: (() -> Unit)? = null
+        set(value) {
+            field = value
+            // AWT may paint before Compose installs its effect. Replay readiness to a late
+            // subscriber instead of leaving the player waiting for a paint that already happened.
+            if (firstPaintNotified) value?.invoke()
+        }
     var onFirstFullSizePaint: (() -> Unit)? = null
+        set(value) {
+            field = value
+            if (firstFullSizePaintNotified) value?.invoke()
+        }
     private var firstPaintNotified = false
     private var firstFullSizePaintNotified = false
 
@@ -50,7 +60,10 @@ internal class NativePlayerHost : Canvas() {
      */
     fun notifyFullSizeIfReady(): Boolean {
         if (firstFullSizePaintNotified || !isShowing || width <= 1 || height <= 1) return false
-        firstPaintNotified = true
+        if (!firstPaintNotified) {
+            firstPaintNotified = true
+            onFirstPaint?.invoke()
+        }
         firstFullSizePaintNotified = true
         onFirstFullSizePaint?.invoke()
         return true
@@ -67,9 +80,8 @@ internal class NativePlayerHost : Canvas() {
         onDisplayableChanged?.invoke(false)
         firstPaintNotified = false
         firstFullSizePaintNotified = false
-        onPeerReady = null
-        onFirstPaint = null
-        onFirstFullSizePaint = null
+        // Listeners belong to the Canvas/controller, not its transient native peer. Compose and
+        // controller.dispose() unregister them when their owners actually leave composition.
         super.removeNotify()
     }
 }

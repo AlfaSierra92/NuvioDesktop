@@ -50,13 +50,13 @@ fun buildMetaDeepLinkUrl(
     type: String,
     id: String,
 ): String = buildString {
-    append("nuvio://meta?type=")
+    append("nuviohtpc://meta?type=")
     append(type.trim().encodeURLParameter())
     append("&id=")
     append(id.trim().encodeURLParameter())
 }
 
-fun buildDownloadsDeepLinkUrl(): String = "nuvio://downloads"
+fun buildDownloadsDeepLinkUrl(): String = "nuviohtpc://downloads"
 
 internal fun parseAppDeepLink(url: String): AppDeepLink? {
     val parsedUrl = runCatching { Url(url) }.getOrNull() ?: return null
@@ -65,7 +65,7 @@ internal fun parseAppDeepLink(url: String): AppDeepLink? {
         val isInvite = parsedUrl.host.lowercase() == "nuvio.tv" && pathSegments.firstOrNull() == "party"
         return if (isInvite) partyDeepLink(pathSegments.getOrNull(1)) else null
     }
-    if (!parsedUrl.protocol.name.equals("nuvio", ignoreCase = true)) return null
+    if (parsedUrl.protocol.name.lowercase() !in setOf("nuvio", "nuviohtpc")) return null
 
     return when (parsedUrl.host.lowercase()) {
         "meta" -> {

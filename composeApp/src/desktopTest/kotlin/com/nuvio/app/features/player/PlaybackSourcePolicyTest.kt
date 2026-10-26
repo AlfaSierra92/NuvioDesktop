@@ -27,6 +27,21 @@ class PlaybackSourcePolicyTest {
     }
 
     @Test
+    fun `LAN streams pass every player gate without requiring a file share root`() {
+        listOf(
+            "http://192.168.1.10:8096/video.mkv",
+            "http://10.0.0.5:8080/stream",
+            "https://172.16.0.2/media",
+            "http://nas.local:8000/movie",
+            "http://[fd00::1]:8096/video",
+        ).forEach { url ->
+            allowed(url)
+            assertEquals(Verdict.Allowed, PlaybackSourcePolicy.checkInProcess(url, noRoots))
+            assertTrue(PlaybackSourcePolicy.allowsSystemHandler(url, noRoots), url)
+        }
+    }
+
+    @Test
     fun `option-shaped sources are refused`() {
         rejected("--script=\\\\evil\\share\\x.lua")
         rejected("-v")

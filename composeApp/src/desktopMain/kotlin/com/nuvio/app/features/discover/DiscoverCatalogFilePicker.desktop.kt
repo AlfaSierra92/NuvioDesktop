@@ -1,5 +1,7 @@
 package com.nuvio.app.features.discover
 
+import com.nuvio.app.core.platform.chooseMacosFile
+import com.nuvio.app.core.platform.usesMacosNativeFileDialogs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -30,6 +32,12 @@ internal actual object DiscoverCatalogFilePicker {
         val holder = arrayOfNulls<File>(1)
         val run = Runnable {
             runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+            if (usesMacosNativeFileDialogs) {
+                holder[0] = chooseMacosFile(
+                    if (save) "Export Discover row" else "Import Discover row",
+                    save = save, initialFile = suggestedName?.let(::File), extensions = setOf("json"))
+                return@Runnable
+            }
             val chooser = JFileChooser().apply {
                 fileSelectionMode = JFileChooser.FILES_ONLY
                 isMultiSelectionEnabled = false

@@ -126,7 +126,7 @@ internal object DesktopAnimeShaders {
     )
 
     private val exportRoot: File by lazy {
-        File(System.getProperty("java.io.tmpdir"), "nuvio-shaders").apply { mkdirs() }
+        File(System.getProperty("java.io.tmpdir"), "nuviohtpc-shaders").apply { mkdirs() }
     }
 
     // name -> exported absolute path (or null if the resource could not be written).

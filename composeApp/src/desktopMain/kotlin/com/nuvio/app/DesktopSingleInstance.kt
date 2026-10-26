@@ -32,7 +32,7 @@ import java.nio.file.StandardOpenOption
  * if need be). The lock, not the port file, is the authority: it is released by the OS the moment
  * the process dies, so a crash never leaves a stale claim behind.
  *
- * A launch carrying a `nuvio://` link (a click on "Open in Nuvio" while the app is already open)
+ * A launch carrying a `nuviohtpc://` link (a click on "Open in Nuvio" while the app is already open)
  * sends `open <link>` instead of `activate`: the primary takes the link, then comes forward.
  */
 object DesktopSingleInstance {

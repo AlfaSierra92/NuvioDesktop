@@ -1,5 +1,7 @@
 package com.nuvio.app.features.settings
 
+import com.nuvio.app.core.platform.chooseMacosFile
+import com.nuvio.app.core.platform.usesMacosNativeFileDialogs
 import com.nuvio.app.relaunchAfterExit
 import com.nuvio.app.core.storage.DesktopStorage
 import com.nuvio.app.core.storage.MACHINE_STORE_NAMES
@@ -288,14 +290,20 @@ internal actual object DesktopSettingsBackup {
     actual fun create(includeCredentials: Boolean): DesktopSettingsBackupResult {
         installSystemLookAndFeel()
         val chosen = runCatching {
-            val chooser = JFileChooser().apply {
-                dialogTitle = "Back up Nuvio settings"
-                fileFilter = FileNameExtensionFilter("Nuvio settings backup (*.zip)", "zip")
-                selectedFile = DesktopStorage.rootDir.resolve(
-                    "nuvio-settings-${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}.zip",
-                ).toFile()
+            val suggested = DesktopStorage.rootDir.resolve(
+                "nuvio-settings-${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}.zip",
+            ).toFile()
+            if (usesMacosNativeFileDialogs) {
+                chooseMacosFile("Back up Nuvio settings", save = true, initialFile = suggested,
+                    extensions = setOf("zip"))?.toPath()
+            } else {
+                val chooser = JFileChooser().apply {
+                    dialogTitle = "Back up Nuvio settings"
+                    fileFilter = FileNameExtensionFilter("Nuvio settings backup (*.zip)", "zip")
+                    selectedFile = suggested
+                }
+                if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
             }
-            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
         }.getOrElse { error ->
             return DesktopSettingsBackupResult.Failed("Could not open the file picker: ${error.message ?: error::class.simpleName}")
         } ?: return DesktopSettingsBackupResult.Cancelled
@@ -365,11 +373,16 @@ internal actual object DesktopSettingsBackup {
     actual fun import(): DesktopSettingsImportResult {
         installSystemLookAndFeel()
         val selected = runCatching {
-            val chooser = JFileChooser(DesktopStorage.rootDir.toFile()).apply {
-                dialogTitle = "Import Nuvio settings"
-                fileFilter = FileNameExtensionFilter("Nuvio settings backup (*.zip)", "zip")
+            if (usesMacosNativeFileDialogs) {
+                chooseMacosFile("Import Nuvio settings", initialFile = DesktopStorage.rootDir.toFile(),
+                    extensions = setOf("zip"))
+            } else {
+                val chooser = JFileChooser(DesktopStorage.rootDir.toFile()).apply {
+                    dialogTitle = "Import Nuvio settings"
+                    fileFilter = FileNameExtensionFilter("Nuvio settings backup (*.zip)", "zip")
+                }
+                if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
             }
-            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
         }.getOrElse { error ->
             return DesktopSettingsImportResult.Failed("Could not open the file picker: ${error.message ?: error::class.simpleName}")
         } ?: return DesktopSettingsImportResult.Cancelled

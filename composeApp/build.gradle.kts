@@ -1749,6 +1749,29 @@ mapOf(
             if (isWindowsHost && imageFlavor == "main" && trainClassArchive) {
                 trainClassArchive(appDir.parentFile, layout.buildDirectory.file("tmp/class-archive-training.log").get().asFile, logger)
             }
+            if (isMacHost) {
+                // jpackage signs before our native staging, jar trimming and build-info writes.
+                // Seal the finished bundle so macOS can attribute privacy permissions to it.
+                val identity = macosSigningIdentity ?: "-"
+                fun codesign(vararg arguments: String) {
+                    val process = ProcessBuilder("/usr/bin/codesign", *arguments)
+                        .redirectErrorStream(true).start()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }
+                    check(process.waitFor() == 0) { "macOS code signing failed: $output" }
+                }
+                val timestamp = if (identity == "-") "--timestamp=none" else "--timestamp"
+                appDir.resolve("native").walkTopDown()
+                    .filter { it.isFile && it.extension == "dylib" }
+                    .forEach { library ->
+                        codesign("--force", "--sign", identity, timestamp, library.absolutePath)
+                    }
+                val bundle = appDir.parentFile.parentFile
+                codesign("--force", "--sign", identity, timestamp, "--options", "runtime",
+                    "--entitlements", project.file("src/desktopMain/resources/macos/nuvio.entitlements.plist").absolutePath,
+                    bundle.absolutePath)
+                codesign("--verify", "--deep", "--strict", bundle.absolutePath)
+                logger.lifecycle("Verified final macOS bundle signature: $bundle")
+            }
         }
     }
 }
@@ -2014,18 +2037,34 @@ compose.desktop {
             // that Compose draw probes cannot see.
             modules("java.net.http", "jdk.httpserver", "jdk.management", "jdk.jfr")
             macOS {
-                bundleID = "com.nuvio.media.desktop"
+                bundleID = "com.nuvio.htpc.desktop"
                 entitlementsFile.set(project.file("src/desktopMain/resources/macos/nuvio.entitlements.plist"))
                 infoPlist {
                     extraKeysRawXml = """
                         <key>CFBundleURLTypes</key>
                         <array><dict>
-                            <key>CFBundleURLName</key><string>com.nuvio.media.desktop</string>
-                            <key>CFBundleURLSchemes</key><array><string>nuvio</string></array>
+                            <key>CFBundleURLName</key><string>com.nuvio.htpc.desktop</string>
+                            <key>CFBundleURLSchemes</key><array><string>nuviohtpc</string></array>
                             <key>CFBundleTypeRole</key><string>Viewer</string>
                         </dict></array>
+                        <key>NSLocalNetworkUsageDescription</key>
+                        <string>Nuvio HTPC connects to media servers, NAS devices, casting devices and streaming addons on your local network.</string>
+                        <key>NSAppTransportSecurity</key>
+                        <dict>
+                            <key>NSAllowsLocalNetworking</key><true/>
+                        </dict>
+                        <key>NSDesktopFolderUsageDescription</key>
+                        <string>Nuvio HTPC opens and saves media, catalog and backup files you choose on your Desktop.</string>
+                        <key>NSDocumentsFolderUsageDescription</key>
+                        <string>Nuvio HTPC opens and saves media, catalog and backup files you choose in Documents.</string>
+                        <key>NSDownloadsFolderUsageDescription</key>
+                        <string>Nuvio HTPC saves downloads and reads media you choose in Downloads.</string>
+                        <key>NSNetworkVolumesUsageDescription</key>
+                        <string>Nuvio HTPC opens media, games and backup files you choose on network volumes.</string>
+                        <key>NSRemovableVolumesUsageDescription</key>
+                        <string>Nuvio HTPC opens media, games and backup files you choose on removable drives.</string>
                         <key>NSAppleEventsUsageDescription</key>
-                        <string>Nuvio requests shutdown when you enable automatic shutdown and its idle countdown finishes.</string>
+                        <string>Nuvio HTPC requests shutdown when you enable automatic shutdown and its idle countdown finishes.</string>
                     """.trimIndent()
                 }
                 iconFile.set(project.file("src/desktopMain/resources/icons/nuvio-app-icon.icns"))

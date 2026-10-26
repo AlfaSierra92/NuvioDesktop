@@ -10,9 +10,14 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import java.time.Duration
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -107,9 +112,13 @@ internal object PlaybackRedirectResolver {
      */
     private const val PERSISTED_VERDICT_TTL_MS = 7L * 24L * 60L * 60L * 1000L
 
-    private val client: HttpClient = HttpClient.newBuilder()
+    private val client = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT)
-        .followRedirects(HttpClient.Redirect.NEVER)
+        .callTimeout(REQUEST_TIMEOUT)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
         .build()
 
     private class EndpointVerdict(val outcome: PlaybackRedirectResolution.Outcome, val atMs: Long)
@@ -177,7 +186,7 @@ internal object PlaybackRedirectResolver {
                 PlaybackRedirectResolution.Outcome.Skipped,
             )
         }
-        val endpoint = endpointKey(normalized)
+        val endpoint = endpointKey(normalized) + "|" + probeMethod(normalized)
         rememberedVerdict(endpoint)?.takeUnless { forceProbe }?.let { verdict ->
             val expired = verdict.outcome == PlaybackRedirectResolution.Outcome.Failed &&
                 System.currentTimeMillis() - verdict.atMs > FAILED_VERDICT_TTL_MS
@@ -250,6 +259,9 @@ internal object PlaybackRedirectResolver {
             // A cross-host hop is the CDN (or another resolver); don't touch it — that open is
             // mpv's to make. Same-host bounces are the resolver rearranging its own endpoints.
             if (!hostOf(next).equals(hostOf(response.requestUrl), ignoreCase = true)) break
+            // AIOStreams redirects onto its own usenet/proxy media path too. That target is
+            // already what mpv needs; opening it here would create a second WebDAV transfer.
+            if (probeMethod(response.requestUrl) == "GET" && probeMethod(next) != "GET") break
             if (hops >= MAX_SAME_HOST_HOPS) break
         }
 
@@ -281,51 +293,58 @@ internal object PlaybackRedirectResolver {
         val expires: String?,
     )
 
+    /** Known redirect-only route: AIOStreams rejects HEAD with 405 on this endpoint. */
+    private fun probeMethod(url: String): String {
+        val path = runCatching { URI(url).path.orEmpty() }.getOrDefault("")
+        return if (path.startsWith("/api/v1/debrid/playback/")) "GET" else "HEAD"
+    }
+
     /**
-     * Inspect headers without opening a media download. A range GET can trigger cold WebDAV
-     * preparation and leave a server-side transfer behind even after its body is closed locally.
-     * If HEAD is unsupported, let mpv open the original URL rather than making a second GET.
+     * Ordinary media URLs only get HEAD. The known AIOStreams resolver needs GET, but redirects
+     * are never followed by the client and its body is cancelled as soon as headers arrive.
      */
     private suspend fun probe(url: String, sourceHeaders: Map<String, String>): ProbeResponse {
-        val builder = HttpRequest.newBuilder()
-            .uri(URI(url))
-            .timeout(REQUEST_TIMEOUT)
-            .method("HEAD", HttpRequest.BodyPublishers.noBody())
+        val method = probeMethod(url)
+        val builder = Request.Builder().url(url)
+            .header("Connection", "close")
+        if (method == "GET") builder.get().header("Range", "bytes=0-0") else builder.head()
         var hasUserAgent = false
         sourceHeaders.forEach { (key, value) ->
             val cleanKey = key.trim()
             val cleanValue = value.trim()
             if (cleanKey.isBlank() || cleanValue.isBlank() ||
-                cleanKey.equals("Range", ignoreCase = true) ||
-                isRestrictedJdkHeader(cleanKey)
-            ) {
-                return@forEach
-            }
+                cleanKey.equals("Range", ignoreCase = true) || isRestrictedJdkHeader(cleanKey)
+            ) return@forEach
             if (cleanKey.equals("User-Agent", ignoreCase = true)) hasUserAgent = true
             builder.header(cleanKey, cleanValue)
         }
-        // Match what mpv will send so a resolver that keys on the UA sees one client, not two.
         if (!hasUserAgent) builder.header("User-Agent", DESKTOP_PLAYBACK_FALLBACK_USER_AGENT)
-
         val request = builder.build()
-        val response = PerfTelemetry.timedHttp("redirect-probe", request.method(), request.uri().toString(), { it.statusCode() }) {
-            suspendCancellableCoroutine<HttpResponse<Void>> { continuation ->
-                val future = client.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-                continuation.invokeOnCancellation { future.cancel(true) }
-                future.whenComplete { result, error ->
-                    if (error != null) continuation.resumeWith(Result.failure(error))
-                    else continuation.resumeWith(Result.success(result))
-                }
+        return PerfTelemetry.timedHttp("redirect-probe", method, url, { it.statusCode }) {
+            suspendCancellableCoroutine { continuation ->
+                val call = client.newCall(request)
+                continuation.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, error: IOException) {
+                        if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val result = ProbeResponse(
+                            requestUrl = url,
+                            statusCode = response.code,
+                            location = response.header("Location"),
+                            cacheControl = response.header("Cache-Control"),
+                            expires = response.header("Expires"),
+                        )
+                        // Cancel before close: closing alone may drain a body to reuse its socket.
+                        call.cancel()
+                        response.close()
+                        if (continuation.isActive) continuation.resumeWith(Result.success(result))
+                    }
+                })
             }
         }
-        val headers = response.headers()
-        return ProbeResponse(
-            requestUrl = url,
-            statusCode = response.statusCode(),
-            location = headers.firstValue("Location").orElse(null),
-            cacheControl = headers.firstValue("Cache-Control").orElse(null),
-            expires = headers.firstValue("Expires").orElse(null),
-        )
     }
 
     /**

@@ -13,7 +13,7 @@ internal object DesktopAnimeSvp {
     private const val resourcePrefix = "/player-scripts/"
 
     private val exportRoot: File by lazy {
-        File(System.getProperty("java.io.tmpdir"), "nuvio-scripts").apply { mkdirs() }
+        File(System.getProperty("java.io.tmpdir"), "nuviohtpc-scripts").apply { mkdirs() }
     }
 
     private val exportedPaths = mutableMapOf<String, String?>()

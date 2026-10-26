@@ -22,7 +22,7 @@ import java.security.MessageDigest
 private val log = Logger.withTag("AutoSync")
 
 private val syncDirectory: File by lazy {
-    File(System.getProperty("java.io.tmpdir"), "nuvio-autosync").apply {
+    File(System.getProperty("java.io.tmpdir"), "nuviohtpc-autosync").apply {
         mkdirs()
         // Retimed copies are only needed while their stream plays; drop anything from past sessions.
         val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
@@ -34,10 +34,6 @@ private val resultCacheLock = Any()
 private val resultCache = object : LinkedHashMap<String, AutomaticSubtitleSyncResult.Synced>(16, 0.75f, true) {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AutomaticSubtitleSyncResult.Synced>?) =
         size > 16
-}
-
-internal actual suspend fun prefetchAutomaticSubtitleSyncIndex(sourceUrl: String, sourceHeaders: Map<String, String>) {
-    EmbeddedSubtitleTimelineLoader.load(sourceUrl, sourceHeaders)
 }
 
 internal actual suspend fun runAutomaticSubtitleSync(

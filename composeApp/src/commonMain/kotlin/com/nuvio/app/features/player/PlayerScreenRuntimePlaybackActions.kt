@@ -39,6 +39,9 @@ internal val PlayerScreenRuntime.activePlaybackIdentity: String
  * episode.
  */
 internal fun PlayerScreenRuntime.beginPlaybackAttempt() {
+    // Cancel reads/speech probes owned by the old source before its replacement opens.
+    automaticSubtitleSyncJob?.cancel()
+    automaticSubtitleSyncJob = null
     playbackAttemptId += 1L
     playerController = null
     playerControllerSourceUrl = null
