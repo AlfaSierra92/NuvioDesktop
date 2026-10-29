@@ -347,6 +347,9 @@ class SteamArtworkTest {
             steamInstallDirectoryName("D:\\SteamLibrary\\steamapps\\common\\Hades\\x64\\Hades.exe"),
         )
         assertNull(steamInstallDirectoryName("D:\\Games\\Hades\\Hades.exe"))
+        assertEquals("Hades", steamInstallDirectoryName(
+            "/Users/Antonio/Library/Application Support/Steam/steamapps/common/Hades/Hades.app/Contents/MacOS/Hades",
+        ))
     }
 
     @Test

@@ -471,7 +471,9 @@ internal fun parseSteamAppManifest(text: String): SteamAppManifest? {
 /** The folder directly under `steamapps/common` that holds [executablePath], if it is in one. */
 internal fun steamInstallDirectoryName(executablePath: String?): String? {
     val path = executablePath?.takeIf(String::isNotBlank) ?: return null
-    var current: File? = File(path).parentFile
+    // Library exports may carry Windows paths even when inspected on macOS. This lookup
+    // extracts a name only; unlike steamAppsDirectoryFor it does not access the filesystem.
+    var current: File? = File(path.replace('\\', '/')).parentFile
     while (current != null) {
         val parent = current.parentFile ?: return null
         if (parent.name.equals("common", ignoreCase = true) &&

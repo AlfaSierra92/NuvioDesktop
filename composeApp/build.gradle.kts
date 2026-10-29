@@ -1368,11 +1368,23 @@ if (isWindowsHost) {
  */
 fun resolveDesktopChannel(override: String?, logger: org.gradle.api.logging.Logger): String {
     if (override != null) return override
-    val appData = System.getenv("LOCALAPPDATA")
-        ?.takeIf { it.isNotBlank() }
-        ?.let(::File)
-        ?: File(System.getProperty("user.home"), "AppData/Local")
-    val updaterPrefs = File(appData, "NuvioHTPC/nuvio_updater.properties")
+    val userHome = File(System.getProperty("user.home"))
+    val osName = System.getProperty("os.name").orEmpty()
+    // Match DesktopInstallPaths: Finder builds must read the macOS preference store too.
+    val dataDir = when {
+        osName.contains("mac", ignoreCase = true) -> File(userHome, "Library/Application Support/NuvioHTPC")
+        osName.startsWith("Windows", ignoreCase = true) -> File(
+            System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)?.let(::File)
+                ?: File(userHome, "AppData/Local"),
+            "NuvioHTPC",
+        )
+        else -> File(
+            System.getenv("XDG_CONFIG_HOME")?.takeIf(String::isNotBlank)?.let(::File)
+                ?: File(userHome, ".config"),
+            "nuviohtpc",
+        )
+    }
+    val updaterPrefs = File(dataDir, "nuvio_updater.properties")
     val stored = runCatching {
         Properties()
             .apply { updaterPrefs.inputStream().use { load(it) } }
@@ -1875,6 +1887,9 @@ tasks.withType<Test>().configureEach {
     // moving its settings into account folders the first time a test opens a store.
     val testDataDir = layout.buildDirectory.dir("test-data-dir").get().asFile
     systemProperty("nuvio.desktop.dataDir", testDataDir.absolutePath)
+    // Text fixtures use English. Do not inherit the developer's macOS language or number format.
+    systemProperty("user.language", "en")
+    systemProperty("user.country", "US")
     doFirst { testDataDir.deleteRecursively() }
     systemProperty(
         "nuvio.focusTests",

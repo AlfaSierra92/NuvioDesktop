@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Restored a discoverable Info button in the desktop playback controls for mpv's live stream diagnostics, synchronized with the context menu and keyboard shortcut. The SVP button now follows actual SVP availability on macOS as well as Windows.
+- macOS settings search now includes supported gamepad controls; game editing shows a macOS application example, and opening logs uses Finder directly. Steam library names can be inspected from Windows paths on macOS.
+- Local build channel detection reads the macOS Application Support preferences instead of a Windows AppData path. Desktop regression fixtures now use a deterministic English locale and portable paths/shader separators; scrolling tests verify exactly one action on both platform dispatch paths.
 - macOS playback could send malformed HTTP headers when a value contained a comma, including the default browser User-Agent, and strict servers could respond with `400 Bad Request`. Playback and probe connections now pass headers as a native libmpv list.
 - The fork now registers `nuviohtpc://` and uses macOS bundle ID `com.nuvio.htpc.desktop`; generated application links use the fork's scheme. The shared parser retains legacy-link compatibility.
 - macOS/Linux legacy-data migration only considers directories containing fork-specific stores. Temporary player resources use HTPC-specific names, and startup no longer deletes original Nuvio's temporary TorrServer binaries.

@@ -27,7 +27,6 @@ import com.nuvio.app.core.ui.SwallowedClickRescue.detectClicksSwallowedByScrolli
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class, ExperimentalFoundationApi::class)
 class SwallowedClickRescueTest {
@@ -57,13 +56,16 @@ class SwallowedClickRescueTest {
         mainClock.advanceTimeBy(16)
         mainClock.autoAdvance = true
         waitForIdle()
-        assertEquals(1, clicks.size, "$name: the click made while easing is lost without the rescue")
-        assertTrue(SwallowedClickRescue.takePendingReplay(), "$name: and is marked for replay")
+        val clicksWhileEasing = clicks.size
+        val replay = SwallowedClickRescue.takePendingReplay()
+        // macOS wheel dispatch can deliver this click directly. Either path must produce
+        // exactly one action: replay a lost click, never duplicate one Compose delivered.
+        assertEquals(2, clicksWhileEasing + if (replay) 1 else 0, "$name: one action per click, including rescue")
 
         // The list has stopped: the same click lands, and is not replayed on top.
         onNodeWithTag("root").performMouseInput { click(Offset(50f, 20f)) }
         waitForIdle()
-        assertEquals(2, clicks.size, "$name: click after the list stopped")
+        assertEquals(clicksWhileEasing + 1, clicks.size, "$name: click after the list stopped")
         assertFalse(SwallowedClickRescue.takePendingReplay(), "$name: a click that landed is not replayed")
     }
 

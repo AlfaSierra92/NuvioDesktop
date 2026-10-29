@@ -69,6 +69,7 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.home.RandomPlayGenres
 import com.nuvio.app.features.updater.AppUpdaterPlatform
 import com.nuvio.app.isWindows
+import com.nuvio.app.features.input.gamepadSupported
 import com.nuvio.app.desktopSvpSupported
 import com.nuvio.app.isDesktop
 import com.nuvio.app.isIos
@@ -621,14 +622,14 @@ private fun settingsSearchEntries(
             description = resolve(Res.string.settings_shortcuts_search_description),
             icon = Icons.Rounded.Keyboard,
         )
-        if (isWindows) {
+        if (gamepadSupported()) {
             // Controller settings share the shortcuts page (a pad press is replayed as the keystroke
             // the same action already has), but nobody searches "keyboard" looking for a gamepad.
             addRow(
                 page = SettingsPage.KeyboardShortcuts,
                 key = "gamepad-control",
                 title = "Gamepad control",
-                description = "Controller support: navigate Nuvio with an Xbox or XInput pad.",
+                description = "Navigate Nuvio with a PlayStation or Xbox controller, wired or over Bluetooth.",
                 pageLabel = resolve(Res.string.compose_settings_page_keyboard_shortcuts),
                 section = "Controller",
                 icon = Icons.Rounded.Keyboard,

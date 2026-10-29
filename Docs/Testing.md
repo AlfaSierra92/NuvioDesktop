@@ -7,6 +7,11 @@ Run commands from the repository root on a prepared host. Use
 can require built native libraries; a successful compile does not establish
 runtime parity on every OS.
 
+Desktop tests run with an English/US JVM locale because text and numeric fixtures
+use that format. This does not change the app's saved language. Windows update
+fixtures create host-native directories, and shader/scroll tests account for the
+host platform instead of assuming Windows behavior.
+
 ## Targeted desktop tests
 
 Bundle paths, JNI linkage, scrolling, application links and LAN URL policy:
@@ -37,6 +42,14 @@ they are not macOS permission or native-playback tests. For a broader desktop ru
 
 ```bash
 ./gradlew --no-configuration-cache :composeApp:desktopTest
+```
+
+To exercise synthetic controller keys and on-screen-keyboard text through real
+focused macOS windows (these briefly take OS focus):
+
+```bash
+./gradlew --no-configuration-cache :composeApp:desktopTest -Pnuvio.focusTests \
+  --tests '*GamepadInjectionRouteTest' --tests '*SyntheticTextInputRouteTest'
 ```
 
 Reports are under `composeApp/build/reports/tests/desktopTest/`; machine-readable

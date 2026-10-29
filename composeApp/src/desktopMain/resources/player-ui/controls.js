@@ -5372,6 +5372,11 @@ const renderChrome = () => {
   applyUltraHudLayout(ultraHud);
   root.classList.toggle("clock-always-visible", Boolean(state.alwaysShowClock));
   root.classList.toggle("mpv-diagnostics", Boolean(mpvDiagnosticsEnabled));
+  const streamInfoButton = document.getElementById("streamInfoButton");
+  if (streamInfoButton) {
+    streamInfoButton.classList.toggle("selected", mpvDiagnosticsEnabled);
+    streamInfoButton.setAttribute("aria-pressed", String(mpvDiagnosticsEnabled));
+  }
   const posterHighlightMode = ["white", "accent", "shine"].includes(
     String(state.posterHighlightMode || "").toLowerCase(),
   )
@@ -6409,6 +6414,10 @@ document.querySelectorAll("[data-command]").forEach(button => {
     event.stopPropagation();
     noteChromeActivity(true);
     const command = button.dataset.command;
+    if (command === "keyboardToggleMpvDiagnostics") {
+      window.nuvioToggleMpvDiagnostics();
+      return;
+    }
     if (command === "audio") {
       openPlayerModal("audio");
       return;

@@ -147,6 +147,17 @@ before testing login/sign-out with both apps installed.
 
 ## Troubleshooting
 
+### Stream information and platform-specific controls
+
+During playback, click **Info** to toggle mpv's live stream diagnostics (codec,
+resolution, frame rate, audio and cache/network details). In a narrow window it
+can move into **More**. The same toggle is available as **MPV diagnostics** in the
+right-click menu and through the configurable diagnostics keyboard shortcut.
+
+The SVP control appears only when a compatible installation is available on
+macOS. NVIDIA RTX Video, Direct3D renderer selection and Windows HDR interface
+correction are Windows-only controls.
+
 ### A LAN URL fails to play
 
 Check `<data-root>/logs/nuvio.log` around the selected source. Distinguish a server

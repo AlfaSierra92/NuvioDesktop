@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.NuvioModalDialog
+import com.nuvio.app.core.platform.usesMacosNativeFileDialogs
 import com.nuvio.app.core.ui.NuvioTextField
 import com.nuvio.app.core.ui.nuvio
 import kotlinx.coroutines.launch
@@ -301,7 +302,11 @@ internal fun GameEditorDialog(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = "C:\\Games\\Example\\game.exe,  a .lnk shortcut,  or  steam://rungameid/620",
+                    placeholder = if (usesMacosNativeFileDialogs) {
+                        "/Applications/Example.app or steam://rungameid/620"
+                    } else {
+                        "C:\\Games\\Example\\game.exe, a .lnk shortcut, or steam://rungameid/620"
+                    },
                 )
             }
             OutlinedButton(

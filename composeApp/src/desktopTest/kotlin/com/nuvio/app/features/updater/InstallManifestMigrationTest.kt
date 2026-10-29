@@ -122,6 +122,7 @@ class InstallManifestMigrationTest {
     private fun tempDir(): File = Files.createTempDirectory("install-manifest-test").toFile().also { tempRoots += it }
 
     private fun File.touch(relative: String) {
-        File(this, relative).apply { parentFile.mkdirs() }.writeText("x")
+        // Manifest entries are Windows paths; create real nested fixtures on POSIX hosts too.
+        File(this, relative.replace('\\', '/')).apply { parentFile.mkdirs() }.writeText("x")
     }
 }
